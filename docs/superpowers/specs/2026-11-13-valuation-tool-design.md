@@ -59,6 +59,11 @@ The output is a mathematical valuation under the user's assumptions. It is never
    - Line items: revenue, COGS, operating income, D&A, interest expense, pretax income, tax expense, net income, CFO, capex, dividends paid, cash, total debt (current + noncurrent), equity, shares outstanding (`dei:EntityCommonStockSharesOutstanding` and diluted weighted shares).
    - Every extracted value records which tag it came from. The UI shows that tag on hover.
    - If a line item is missing, the field is left empty and flagged for the user to fill in. The parser never guesses.
+   - **Verified 2026-11-13 in Chrome:** `https://data.sec.gov/api/xbrl/companyfacts/CIK0001045810.json` opens as raw JSON with no login, and the user saves it with Ctrl+S.
+   - **Links in the guide:**
+     - CIK lookup: `https://www.sec.gov/edgar/search/`, plus `https://www.sec.gov/files/company_tickers.json`
+     - Company data file: `https://data.sec.gov/api/xbrl/companyfacts/CIK{10-digit}.json`
+     - The guide builds this link for the user once they enter a ticker, using a small static ticker→CIK map shipped with the site. That's public-domain SEC data, refreshed by hand.
 2. **Manual entry.** The same form, empty. Any pre-filled value can also be overridden.
 3. **Market inputs the filing doesn't contain:** current share price and the 10-year Treasury yield (risk-free rate). The user types these in, and the site links to where to look them up.
 
@@ -74,6 +79,12 @@ The output is a mathematical valuation under the user's assumptions. It is never
      - the Blume-adjusted beta (0.67β + 0.33);
      - a scatter plot with the regression line.
      Raw beta is unlevered at the historical D/E and relevered at the current D/E from the filing.
+     - **Verified 2026-11-13:** `https://www.nasdaq.com/market-activity/stocks/{ticker}/historical` and `https://www.nasdaq.com/market-activity/etf/spy/historical`. Choose "5Y", then "Download historical data". No login; the cookie banner can be ignored.
+       - The result is `HistoricalData_<timestamp>.csv`: about 1,255 daily rows, columns `Date,Close/Last,Volume,Open,High,Low`, dates in MM/DD/YYYY.
+       - Stock prices carry a `$` sign; ETF prices don't.
+       - Prices are split-adjusted (NVDA 2021 shows about $30) but not dividend-adjusted.
+       - **The file doesn't contain the ticker, and both files have the same name pattern,** so the UI uses two separately labelled drop zones: Stock and Market.
+     - **Sanity run on these files:** NVDA vs SPY, 59 monthly returns, gives β = 2.24, SE 0.29, R² 0.51, Blume 1.83.
      - **CSV parser:** auto-detects the Nasdaq format (`Date, Close/Last, …` with `$` signs) and also accepts Yahoo, Stooq or any `Date,Close` file.
      - Prices are aligned on month-end dates. Gaps are flagged, never filled in.
      - **Dividends:** price-only returns, which is standard practice. The UI notes this.
@@ -116,6 +127,16 @@ The output is a mathematical valuation under the user's assumptions. It is never
 - **Summary:** value per share for each model, a range bar, the current price for reference (not a verdict), and a prominent disclaimer.
 - **Per-model detail:** the year-by-year table, the formulas written out, and a sensitivity grid (discount rate × terminal growth) for the DCFs.
 - **Notes per model:** "Best for", "Watch out for", and "Does this survive AI?" Short, honest and hedged. They can link to the blog post once it exists.
+
+## Employer-facing extras
+
+A recruiter gives a project about 30 seconds and won't download files first. So:
+- **"Try it with NVIDIA" demo button,** using a bundled NVIDIA companyfacts file. SEC data is public domain, so it can be shipped.
+  - The demo's beta is a pre-entered 2.24, labelled as computed from Nasdaq prices on 2026-11-13.
+  - Nasdaq price files are *not* bundled, because redistributing them is legally unclear. Uploading CSVs recomputes the beta.
+- **A methodology page:** formulas, sources, assumptions and known limits. This is where the finance judgment shows.
+- **An NVIDIA case-study write-up** on the personal site, linking to the tool and the AI-valuation post.
+- **A README** with a screenshot, a link to the live demo, and the Excel export showcased.
 
 ## Excel export
 
