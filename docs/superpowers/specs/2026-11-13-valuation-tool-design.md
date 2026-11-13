@@ -1,6 +1,39 @@
 # Valuation Models Tool: Design
 
-Date: 2026-11-13 · Status: draft, awaiting approval
+Date: 2026-11-13 · Status: approved 2026-11-13
+
+> **Revision (approved):** the primary data path is now a **monthly GitHub Action snapshot** (see "Data pipeline"). Users type a ticker, and the S&P 500 is pre-filled from static JSON. File upload stays as the "Advanced / any company" path. Where older sections below say "user uploads", read it as the fallback path.
+
+## Data pipeline (primary)
+
+- **Schedule:** a GitHub Action runs monthly on the 2nd at 06:00 UTC, plus manual `workflow_dispatch`. Free on a public repo, and nothing runs on Vercel.
+- **Fundamentals:**
+  - Downloads SEC's nightly bulk `https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip` (about 1 GB, one request) with `User-Agent` from the secret `SEC_USER_AGENT`.
+  - Fallback if the bulk download fails: per-company `data.sec.gov` requests at ≤5 req/s.
+  - Keeps the S&P 500 (constituents refreshed each run from a public list, with the last list kept on failure) and trims each company to the needed tags, annual 10-K data only.
+  - Writes `public/data/companies/{TICKER}.json` plus `public/data/index.json` (ticker, name, CIK, sector, data date).
+- **Beta, layered:**
+  - For each ticker plus SPY, the action gets 5 years of monthly closes from Nasdaq's endpoint (`api.nasdaq.com/api/quote/{T}/historical`), falling back to Yahoo's chart endpoint.
+  - It computes OLS beta, R², SE, Blume beta and n, and publishes only those numbers, never raw prices.
+  - Per ticker on failure: keep last month's values. If both sources fail broadly: keep all previous betas and alert. The site's final fallback is Damodaran's industry beta (`betas.xls`, a static link refreshed each January, credited).
+- **Safety:**
+  - Retries with backoff.
+  - If more than 5% of tickers fail, the run aborts without committing, so the site keeps last month's data.
+  - On failure the action opens a GitHub issue, which emails the owner.
+  - A keep-alive step prevents GitHub from disabling the schedule after 60 days.
+  - The site shows "Data as of …".
+- **Commit:** the action commits `public/data/**` to `main`, and Vercel auto-deploys. Expected size is about 10–20 MB.
+- **First milestone:** run the action once on GitHub to confirm the 1 GB download, the runner disk and memory, and whether Nasdaq and Yahoo reach GitHub's servers.
+
+## Visual identity
+
+Matches the personal site (`website-finalized/DESIGN.md`): warm editorial minimalism.
+- **Colors:** creme `#FDFBF6` / aubergine `#0F090E` grounds, maroon `#4A0E0E` / raspberry `#D43D55` accent, seams tinted toward the accent.
+- **Type:** Bodoni Moda for display, Geist Sans for body, Geist Mono for labels and **all figures in tables**.
+- **Motion:** low-energy, with reduced-motion support.
+- **Voice:** first-person and short, no em dashes in visible copy, no emoji.
+- **Charts:** maroon/raspberry for the series, neutrals otherwise. Never green/red, since that reads as buy/sell.
+- The finance tables should feel like a well-set annual report.
 
 ## Intent
 
