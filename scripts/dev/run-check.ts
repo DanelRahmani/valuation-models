@@ -1,0 +1,14 @@
+import { readFileSync } from 'node:fs';
+import { extractHistoricals } from '../../src/lib/finance/extract';
+import { defaultAssumptions } from '../../src/lib/finance/assumptions';
+import { runAll } from '../../src/lib/finance/run';
+const h = extractHistoricals(JSON.parse(readFileSync(process.argv[2], 'utf8')));
+const { a, src } = defaultAssumptions(h, { price: 166.19, rf: 0.042, erp: 0.043, beta: { beta: 2.238, alpha: 0, r2: 0.51, se: 0.29, n: 59, blume: 1.83, source: 'upload', asOf: '2026-11-13' } });
+a.peers = { pe: 30, evEbitda: 22, evSales: 8, pb: 6, peg: 1.5 };
+a.aiMode = process.argv[3] === 'ai';
+const o = runAll(h, a, src);
+const I = o.values.inputs;
+console.log({ wacc: I.wacc, re: I.re, ru: I.ru, g1: I.g_stage1, margin: I.margin_0, tax: I.tax, shares: I.shares, netDebt: I.net_debt });
+for (const r of o.results) console.log(r.id.padEnd(12), r.status.padEnd(12), r.perShare?.toFixed(2) ?? '-', r.message ?? '');
+console.log('reverse', o.reverse, 'warnings', o.warnings);
+console.log('sens', o.sensitivity?.grid.map((r) => r.map((x) => x?.toFixed(0)).join(' ')).join(' | '));
