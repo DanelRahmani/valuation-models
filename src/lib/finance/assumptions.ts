@@ -33,6 +33,12 @@ export interface Assumptions {
   hHalfLife: number;
   peers: { pe: number | null; evEbitda: number | null; evSales: number | null; pb: number | null; peg: number | null };
   aiMode: boolean;
+  /** Banks, insurers, brokers and asset managers: valued on equity (residual income, dividends, P/E, P/B), not enterprise value. */
+  financial: boolean;
+  /** Return on equity, used by the financial-firm residual income model. */
+  roe: number | null;
+  /** Set when the latest margin looks depressed by one-off charges and the forecast starts from the 5-yr median instead. */
+  oneOff?: { year: number; latest: number; adjusted: number; charges: number; tag: string } | null;
   newShares: number;
   scenarios: Record<'bear' | 'base' | 'bull', { g1: number; margin: number; capexPct: number; prob: number }>;
 }
@@ -54,12 +60,42 @@ function avgRatio(h: Historicals, num: LineItem, den: LineItem, n = 3): number |
   return r.length ? r.reduce((x, y) => x + y, 0) / r.length : null;
 }
 
+/** Below this R², stock returns say too little about market risk and the industry beta is used instead. */
+export const MIN_BETA_R2 = 0.2;
+
+/** An industry beta from fewer firms than this is as noisy as one company's regression. */
+export const MIN_INDUSTRY_FIRMS = 10;
+
+export function defaultBetaMethod(reg: SnapshotBeta | null, industryFirms: number | null | undefined): 'blume' | 'industry' | 'manual' {
+  const industryOk = (industryFirms ?? 0) >= MIN_INDUSTRY_FIRMS;
+  if (reg && reg.r2 >= MIN_BETA_R2) return 'blume';
+  if (industryOk) return 'industry';
+  return reg ? 'blume' : 'manual';
+}
+
+/** GICS sub-industries whose debt is operating funding rather than financing. */
+const FINANCIAL_SUBINDUSTRIES = [
+  /bank/i,
+  /insurance(?! brokers)/i,
+  /reinsurance/i,
+  /consumer finance/i,
+  /investment banking/i,
+  /asset management/i,
+  /multi-sector holdings/i,
+];
+export const isFinancialFirm = (subIndustry?: string | null) => !!subIndustry && FINANCIAL_SUBINDUSTRIES.some((r) => r.test(subIndustry));
+
 export interface MarketContext {
   price?: number | null;
   rf?: number;
   erp?: number;
   beta?: SnapshotBeta | null;
   industryBetaU?: number | null;
+  industryFirms?: number | null;
+  /** GICS sub-industry, to recognise banks and insurers. */
+  subIndustry?: string | null;
+  /** Market capitalisation in dollars from the snapshot, to catch stale share counts. */
+  marketCap?: { value: number; date: string } | null;
 }
 
 export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Assumptions; src: Sources } {
@@ -75,51 +111,104 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
   const rev = latest(h, 'revenue');
   const ebit = latest(h, 'operatingIncome');
   const ni = latest(h, 'netIncome');
-  const sharesRaw = latest(h, 'sharesOutstanding') ?? latest(h, 'dilutedShares');
+  // Shares: the latest cover-page count (10-K or 10-Q, so later splits count). Companies with several share
+  // classes often report only one class there; if it is far below diluted shares, diluted shares are used.
+  const cover = h.latestShares?.value ?? latest(h, 'sharesOutstanding');
+  const diluted = latest(h, 'dilutedShares');
+  let sharesRaw = cover;
+  src.shares = h.latestShares ? `Cover page of the ${h.latestShares.tag.includes('10-Q') ? '10-Q' : '10-K'} dated ${h.latestShares.end}` : `${tagOf('sharesOutstanding')}, latest 10-K`;
+  if (diluted != null && (cover == null || cover < 0.6 * diluted)) {
+    sharesRaw = diluted;
+    src.shares = cover == null ? 'Diluted weighted shares, latest 10-K' : 'Diluted weighted shares, latest 10-K (the cover page lists only one share class)';
+  }
+  // Cross-check against the market: a split, reverse split or merger after the latest filing moves the share
+  // count by 1.5x or more. Small gaps (share classes, buybacks) are left alone.
+  const implied = mkt.marketCap && mkt.price ? mkt.marketCap.value / mkt.price : null;
+  if (implied != null && (sharesRaw == null || implied / sharesRaw > 1.4 || implied / sharesRaw < 0.7)) {
+    src.shares =
+      sharesRaw == null
+        ? `Market cap / price (Nasdaq, ${mkt.marketCap!.date}); no total share count in SEC data`
+        : `Market cap / price (Nasdaq, ${mkt.marketCap!.date}); the filed count of ${(sharesRaw / M).toFixed(0)}M predates a split or merger`;
+    sharesRaw = implied;
+  }
   const shares = sharesRaw != null ? sharesRaw / M : null;
-  src.shares = `${tagOf('sharesOutstanding') ?? tagOf('dilutedShares')}, latest filing`;
 
   const cash = (latest(h, 'cash') ?? 0) / M;
   const sti = (latest(h, 'shortTermInvestments') ?? 0) / M;
-  const debt = ((latest(h, 'debtCurrent') ?? 0) + (latest(h, 'debtNoncurrent') ?? 0)) / M;
+  const debt = (latest(h, 'debt') ?? 0) / M;
   src.cash = `FY${fy} 10-K`;
   src.sti = `FY${fy} 10-K`;
-  src.debt = `FY${fy} 10-K, current + noncurrent debt`;
+  src.debt = `FY${fy} 10-K, total debt (${tagOf('debt') ?? 'none reported'})`;
 
-  const taxAvg = avgRatio(h, 'taxExpense', 'pretaxIncome');
-  const tax = taxAvg != null ? clamp(taxAvg, 0, 0.35) : 0.21;
-  src.tax = taxAvg != null ? '3-yr effective tax rate' : 'US statutory 21%';
+  // Pooled 3-yr effective rate (sum of tax / sum of pre-tax income), so one year of tax benefits
+  // cannot swing it. A negative or implausible rate is not sustainable, so the statutory rate is used.
+  const pt3 = lastN(h, 'pretaxIncome');
+  const pairs = lastN(h, 'taxExpense')
+    .map((t, i) => [t, pt3[i]])
+    .filter(([t, p]) => Number.isFinite(t) && Number.isFinite(p));
+  const ptTotal = pairs.reduce((s, [, p]) => s + p, 0);
+  const pooled = pairs.length && ptTotal > 0 ? pairs.reduce((s, [t]) => s + t, 0) / ptTotal : null;
+  const tax = pooled != null && pooled >= 0 && pooled <= 0.4 ? Math.min(pooled, 0.35) : 0.21;
+  src.tax =
+    pooled == null
+      ? 'US statutory 21%'
+      : pooled < 0 || pooled > 0.4
+        ? `US statutory 21% (3-yr effective rate of ${(pooled * 100).toFixed(0)}% is not sustainable)`
+        : '3-yr effective tax rate (total tax / total pre-tax income)';
 
   const interest = latest(h, 'interestExpense');
   const rdRaw = interest != null && debt > 0 ? interest / M / debt : null;
-  const rd = rdRaw != null ? clamp(rdRaw, rf, rf + 0.08) : rf + 0.01;
-  src.rd = rdRaw != null ? 'Interest expense / debt, bounded by the risk-free rate' : 'Risk-free + 1%';
+  const rd = rdRaw != null ? clamp(rdRaw, rf + 0.01, rf + 0.08) : rf + 0.01;
+  src.rd = rdRaw != null ? 'Interest expense / debt, between risk-free + 1% and + 8%' : 'Risk-free + 1%';
 
-  // Beta: regression from the snapshot (Blume-adjusted is offered as an option), else industry, else 1.
+  // Beta: see defaultBetaMethod. Blume-adjusted regression when the regression explains enough, else the
+  // industry beta relevered at this company's debt-to-equity, else 1.
   const mcap = mkt.price != null && shares != null ? mkt.price * shares : null;
   let beta = 1;
   let betaSource: Assumptions['betaSource'] = 'manual';
-  if (mkt.beta) {
-    beta = mkt.beta.beta;
-    betaSource = 'regression';
-    src.beta = `Regression vs SPY, ${mkt.beta.n} monthly returns (${mkt.beta.source})`;
-  } else if (mkt.industryBetaU != null && mcap) {
+  const method = defaultBetaMethod(mkt.beta ?? null, mkt.industryBetaU != null && mcap ? mkt.industryFirms ?? MIN_INDUSTRY_FIRMS : 0);
+  if (method === 'blume' && mkt.beta) {
+    beta = mkt.beta.blume;
+    betaSource = 'blume';
+    src.beta = 'Blume-adjusted regression beta: 0.67β + 0.33';
+  } else if (method === 'industry' && mkt.industryBetaU != null && mcap) {
     beta = mkt.industryBetaU * (1 + (1 - tax) * (debt / mcap));
     betaSource = 'industry';
-    src.beta = 'Damodaran industry beta, relevered';
+    src.beta = mkt.beta
+      ? `Damodaran industry beta, relevered (the regression's R² of ${mkt.beta.r2.toFixed(2)} is too low to rely on)`
+      : 'Damodaran industry beta, relevered';
   } else src.beta = 'Default 1.0';
 
   const margin0 = rev && ebit != null ? ebit / rev : null;
   src.margin0 = `FY${fy} operating margin`;
   src.marginTarget = 'Held at current margin';
 
+  // One-off charges: impairments of goodwill, intangibles and long-lived assets are non-cash and do not recur, but
+  // they sink that year's operating margin. When they exceed 1% of revenue, the forecast adds them back.
+  const imp = h.items.impairments?.at(-1);
+  const oneOff =
+    margin0 != null && rev && ebit != null && imp && imp.value > 0.01 * rev && fy != null
+      ? { year: fy, latest: margin0, adjusted: (ebit + imp.value) / rev, charges: imp.value / M, tag: imp.tag }
+      : null;
+  if (oneOff) src.marginTarget = `FY${fy} margin before $${oneOff.charges.toFixed(0)}M of impairments (${oneOff.tag})`;
+
   const cagrYears = Math.min(3, h.years.length - 1);
   const revs = h.items.revenue ?? [];
   const r0 = revs.at(-1 - cagrYears)?.value;
-  const cagr = rev && r0 && r0 > 0 && cagrYears > 0 ? Math.pow(rev / r0, 1 / cagrYears) - 1 : null;
-  const g1 = cagr != null ? clamp(cagr, -0.1, 0.3) : 0.05;
+  // Median of the last three annual growth rates rather than the CAGR: one merger year (Smurfit Westrock) or
+  // post-COVID rebound (Las Vegas Sands, Carnival) would otherwise be projected for five more years.
+  const yoy = revs
+    .slice(-4)
+    .map((v, i, arr) => (i && v && arr[i - 1] && arr[i - 1]!.value > 0 ? v.value / arr[i - 1]!.value - 1 : NaN))
+    .filter(Number.isFinite)
+    .sort((x, y) => x - y);
+  const cagr = yoy.length ? yoy[Math.floor(yoy.length / 2)] : null;
+  void r0;
+  const g1 = cagr != null ? clamp(cagr, -0.1, 0.2) : 0.05;
   src.g1 =
-    cagr == null ? 'Default 5%' : cagr > 0.3 ? `${cagrYears}-yr revenue CAGR ${(cagr * 100).toFixed(0)}%, capped at 30%` : `${cagrYears}-yr revenue CAGR`;
+    cagr == null
+      ? 'Default 5%'
+      : `Median revenue growth of the last ${yoy.length} years${cagr > 0.2 ? ` (${(cagr * 100).toFixed(0)}%), capped at 20%: few large companies sustain more for five years` : cagr < -0.1 ? `, floored at -10%` : ''}`;
   const gT = Math.min(0.025, rf);
   src.gT = 'Long-run nominal growth, capped at the risk-free rate';
 
@@ -139,6 +228,21 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
   src.exitMultiple = 'Default 12x EBITDA';
   void ebitda;
 
+  const financial = isFinancialFirm(mkt.subIndustry);
+  const roeAvg = avgRatio(h, 'netIncome', 'equity');
+  const roe = roeAvg != null ? clamp(roeAvg, -0.1, 0.4) : null;
+  src.roe = '3-yr average net income / book equity';
+  let g1Final = g1;
+  if (financial) {
+    // Bank and insurer "revenue" is not comparable across filers; grow book equity at its own 3-yr pace instead.
+    const eq = h.items.equity ?? [];
+    const e0 = eq.at(-1 - cagrYears)?.value;
+    const e1 = eq.at(-1)?.value;
+    const eqCagr = e0 && e1 && e0 > 0 && e1 > 0 && cagrYears > 0 ? Math.pow(e1 / e0, 1 / cagrYears) - 1 : null;
+    g1Final = eqCagr != null ? clamp(eqCagr, 0, 0.12) : 0.04;
+    src.g1 = eqCagr != null ? `${cagrYears}-yr book equity growth, bounded 0-12%` : 'Default 4%';
+  }
+
   const m = margin0 ?? 0.1;
   const a: Assumptions = {
     price: mkt.price ?? null,
@@ -150,13 +254,16 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
     tax,
     rev0: rev != null ? rev / M : null,
     margin0,
-    marginTarget: margin0,
-    marginYears: 5,
+    marginTarget: oneOff ? oneOff.adjusted : margin0,
+    marginYears: oneOff ? 1 : 5,
+    oneOff,
     daPct,
     capexPct,
     nwcPct: 0.1,
-    g1,
+    g1: g1Final,
     gT,
+    financial,
+    roe,
     terminalMethod: 'gordon',
     exitMultiple: 12,
     cash,
@@ -218,7 +325,8 @@ export function inputDefs(a: Assumptions, src: Sources, h: Historicals): InputDe
     I('wacc', 'WACC', '=(1-w_debt)*re+w_debt*rd*(1-tax)', 'pct', 'Cost of capital', 'E/V × re + D/V × rd × (1 - t)'),
     I('beta_u', 'Unlevered beta (Hamada)', '=beta_l/(1+(1-tax)*de_ratio)', 'beta', 'Cost of capital', 'β / (1 + (1 - t) D/E)'),
     I('ru', 'Unlevered cost of equity', '=rf+beta_u*erp', 'pct', 'Cost of capital', 'rf + βu × ERP'),
-    I('g_stage1', 'Revenue growth, years 1-5', a.g1, 'pct', 'Forecast', src.g1),
+    I('g_stage1', a.financial ? 'Book equity growth, years 1-5' : 'Revenue growth, years 1-5', a.g1, 'pct', 'Forecast', src.g1),
+    I('roe', 'Return on equity', a.roe, 'pct', 'Forecast', src.roe),
     I('g_terminal', 'Terminal growth', a.gT, 'pct', 'Forecast', src.gT),
     I('margin_0', 'Operating margin, now', a.margin0, 'pct', 'Forecast', src.margin0),
     I('margin_target', 'Operating margin, target', a.marginTarget, 'pct', 'Forecast', src.marginTarget),

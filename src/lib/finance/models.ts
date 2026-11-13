@@ -39,7 +39,17 @@ export function fcffSheet(a: Assumptions, baseYear: number, o: FcffOpts): SheetD
     { key: 'ebit', label: 'Operating income (EBIT)', fmt: 'usdm', cells: each((t) => `=@revenue[${t}]*@margin[${t}]`, 0) },
     { key: 'nopat', label: 'EBIT × (1 - tax)', fmt: 'usdm', cells: each((t) => `=@ebit[${t}]*(1-tax)`) },
     { key: 'da', label: '+ Depreciation & amortisation', fmt: 'usdm', cells: each((t) => `=@revenue[${t}]*da_pct`) },
-    { key: 'capex', label: '- Capital expenditure', fmt: 'usdm', cells: each((t) => `=@revenue[${t}]*${o.capex}`) },
+    {
+      key: 'capex',
+      label: '- Capital expenditure',
+      fmt: 'usdm',
+      cells: each((t) =>
+        t <= HIGH
+          ? `=@revenue[${t}]*${o.capex}`
+          : `=@revenue[${t}]*(${o.capex}+(MIN(da_pct,${o.capex})-${o.capex})*${((t - HIGH) / (N - HIGH)).toFixed(4)})`,
+      ),
+      note: 'Held at its share of revenue for five years. If it runs above D&A, it then falls to D&A by year 10: a mature company spends roughly what it depreciates. Capex below D&A (amortisation of acquired intangibles, which never needs replacing) is left alone.',
+    },
     { key: 'dnwc', label: '- Increase in working capital', fmt: 'usdm', cells: each((t) => `=(@revenue[${t}]-@revenue[${t - 1}])*nwc_pct`) },
     { key: 'fcff', label: 'Free cash flow to the firm', fmt: 'usdm', emphasis: true, cells: each((t) => `=@nopat[${t}]+@da[${t}]-@capex[${t}]-@dnwc[${t}]`) },
     { key: 'df', label: 'Discount factor at WACC', fmt: 'num', cells: each((t) => `=1/(1+wacc)^${t}`) },
@@ -130,6 +140,41 @@ export function riSheet(baseYear: number): SheetDef {
   return { id: 'ri', name: 'ResidualIncome', title: 'Residual income', columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
 }
 
+/**
+ * Residual income for banks and insurers: book equity is the operating base, so it grows with the growth path and
+ * earns the return on equity. Value = book + PV of (ROE - cost of equity) × opening book.
+ */
+export function riFinancialSheet(baseYear: number): SheetDef {
+  const rows: RowDef[] = [
+    { key: 'growth', label: 'Book equity growth', fmt: 'pct', cells: each(growth('g_stage1')) },
+    { key: 'book', label: 'Book equity, end of year', fmt: 'usdm', cells: ['=equity_0', ...each((t) => `=@book[${t - 1}]*(1+@growth[${t}])`).slice(1)] },
+    {
+      key: 'roe',
+      label: 'Return on equity',
+      fmt: 'pct',
+      cells: each((t) => (t <= HIGH ? '=roe' : `=roe-(roe-re)*0.5*${((t - HIGH) / (N - HIGH)).toFixed(4)}`)),
+      note: 'Held for five years, then half the gap to the cost of equity closes by year 10: competition erodes excess returns.',
+    },
+    { key: 'ni', label: 'Net income (ROE × opening book)', fmt: 'usdm', cells: each((t) => `=@roe[${t}]*@book[${t - 1}]`) },
+    { key: 'charge', label: 'Equity charge (re × opening book)', fmt: 'usdm', cells: each((t) => `=re*@book[${t - 1}]`) },
+    {
+      key: 'ri',
+      label: 'Residual income',
+      fmt: 'usdm',
+      emphasis: true,
+      cells: each((t) => `=@ni[${t}]-@charge[${t}]`),
+      note: 'A bank earning exactly its cost of equity is worth its book value.',
+    },
+    { key: 'df', label: 'Discount factor at cost of equity', fmt: 'num', cells: each((t) => `=1/(1+re)^${t}`) },
+    { key: 'pv', label: 'Present value of residual income', fmt: 'usdm', cells: each((t) => `=@ri[${t}]*@df[${t}]`) },
+    { key: 'tv', label: 'Terminal value of residual income', fmt: 'usdm', cells: atN(`=@ri[${N}]*(1+g_terminal)/(re-g_terminal)`) },
+    { key: 'pv_tv', label: 'Present value of terminal value', fmt: 'usdm', cells: atN(`=@tv[${N}]*@df[${N}]`) },
+    { key: 'equity', label: 'Book equity + PV of residual income', fmt: 'usdm', emphasis: true, cells: at0(`=@book[0]+SUM(@pv[1]:@pv[${N}])+@pv_tv[${N}]`) },
+    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0('=@equity[0]/shares') },
+  ];
+  return { id: 'ri', name: 'ResidualIncome', title: 'Residual income (financial firm)', columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
+}
+
 export function ddmSheets(): SheetDef[] {
   const gordon: SheetDef = {
     id: 'ddm_gordon',
@@ -196,13 +241,14 @@ export function multiplesSheet(a: Assumptions, ebitda0: number | null): SheetDef
       key: 'ev_ebitda',
       label: 'EV/EBITDA: (EBITDA × multiple - net debt) / shares',
       fmt: 'usd',
-      cells: ['=ebit_0+da_0', '=ev_ebitda_peer', ok(ebitda0, a.peers.evEbitda) ? '=(@ev_ebitda[0]*@ev_ebitda[1]-net_debt)/shares' : null],
+      // Not for banks and insurers: their debt is operating funding, so enterprise value means nothing.
+      cells: ['=ebit_0+da_0', '=ev_ebitda_peer', !a.financial && ok(ebitda0, a.peers.evEbitda) ? '=(@ev_ebitda[0]*@ev_ebitda[1]-net_debt)/shares' : null],
     },
     {
       key: 'ev_sales',
       label: 'EV/Sales: (revenue × multiple - net debt) / shares',
       fmt: 'usd',
-      cells: ['=rev_0', '=ev_sales_peer', ok(a.rev0, a.peers.evSales) ? '=(@ev_sales[0]*@ev_sales[1]-net_debt)/shares' : null],
+      cells: ['=rev_0', '=ev_sales_peer', !a.financial && ok(a.rev0, a.peers.evSales) ? '=(@ev_sales[0]*@ev_sales[1]-net_debt)/shares' : null],
     },
     {
       key: 'pb',

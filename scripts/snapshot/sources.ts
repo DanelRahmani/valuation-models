@@ -120,6 +120,48 @@ export async function nasdaqPrices(ticker: string, etf = false): Promise<PricePo
   return rows.map((r) => ({ date: isoFromUs(r.date), close: Number(String(r.close).replace(/[$,]/g, '')) })).sort((a, b) => a.date.localeCompare(b.date));
 }
 
+/** Market capitalisation from Nasdaq's quote summary, in dollars. */
+export async function nasdaqMarketCap(ticker: string): Promise<number> {
+  const sym = ticker; // the quote summary takes BRK.B as is (the price history wants BRK-B)
+  const j: any = await (await get(`https://api.nasdaq.com/api/quote/${encodeURIComponent(sym)}/summary?assetclass=stocks`, { Accept: 'application/json' })).json();
+  const v = Number(String(j?.data?.summaryData?.MarketCap?.value ?? '').replace(/[$,]/g, ''));
+  if (!(v > 0)) throw new Error(`Nasdaq ${ticker}: no market cap`);
+  return v;
+}
+
+export interface NasdaqAnnual {
+  end: string;
+  revenue: number | null;
+  netIncome: number | null;
+  equity: number | null;
+}
+
+/**
+ * Annual statements from Nasdaq (compiled independently of SEC XBRL tags), used only to check the extraction.
+ * Values are reported in thousands; returned in dollars, most recent year first.
+ */
+export async function nasdaqFinancials(ticker: string): Promise<NasdaqAnnual[]> {
+  const j: any = await (await get(`https://api.nasdaq.com/api/company/${encodeURIComponent(ticker)}/financials?frequency=1`, { Accept: 'application/json' })).json();
+  if (!j?.data?.incomeStatementTable?.rows) throw new Error(`Nasdaq ${ticker}: no financials`);
+  return parseNasdaqFinancials(j.data);
+}
+
+/** Parse the `data` object of Nasdaq's financials response. */
+export function parseNasdaqFinancials(d: any): NasdaqAnnual[] {
+  const num = (s: unknown) => {
+    const n = Number(String(s ?? '').replace(/[$,]/g, ''));
+    return s && s !== '--' && Number.isFinite(n) ? n * 1000 : null;
+  };
+  const row = (table: string, label: string) => d[table]?.rows?.find((r: any) => r.value1 === label);
+  const rev = row('incomeStatementTable', 'Total Revenue');
+  // Like for like with the extraction, which uses income to common shareholders where the filing's EPS supports it.
+  const ni = row('incomeStatementTable', 'Net Income Applicable to Common Shareholders') ?? row('incomeStatementTable', 'Net Income');
+  const eq = row('balanceSheetTable', 'Total Equity');
+  return ['value2', 'value3', 'value4', 'value5']
+    .filter((c) => d.incomeStatementTable.headers?.[c])
+    .map((c) => ({ end: isoFromUs(d.incomeStatementTable.headers[c]), revenue: num(rev?.[c]), netIncome: num(ni?.[c]), equity: num(eq?.[c]) }));
+}
+
 export async function yahooPrices(ticker: string): Promise<PricePoint[]> {
   const sym = ticker.replace('.', '-');
   const j: any = await (await get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=5y&interval=1d`)).json();
@@ -165,7 +207,10 @@ export async function damodaranIndustries(): Promise<Industry[]> {
     return new Map(s.rows.map((r) => [r[0] as string, num(r[c])]));
   };
   const bu = pick(beta, /^Unlevered beta$/i);
-  const peM = pick(pe, /^Current PE$/i);
+  // Aggregate market cap / net income of profitable firms: the simple-average "Current PE" is blown up by firms
+  // with tiny earnings (pharma reads 335x on it, 25x on this).
+  const peAgg = pick(pe, /^Aggregate Mkt Cap\/\s*Trailing Net Income \(only money making firms\)$/i);
+  const peM = col(pe, /^Aggregate Mkt Cap\/\s*Trailing Net Income \(only money making/i) >= 0 ? peAgg : pick(pe, /^Current PE$/i);
   const pegM = pick(pe, /^PEG Ratio$/i);
   const evM = pick(ev, /^EV\/EBITDA$/i);
   const esM = pick(ps, /^EV\/Sales$/i);

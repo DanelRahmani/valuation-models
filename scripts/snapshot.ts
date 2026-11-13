@@ -2,8 +2,9 @@
  * Monthly data snapshot. Run by .github/workflows/snapshot.yml, or locally:
  *   SEC_USER_AGENT="Name contact@example.com" npx tsx scripts/snapshot.ts [--only NVDA,AAPL] [--skip-prices] [--facts-dir DIR]
  *
- * Writes public/data/{index.json, market.json, companies/*.json}. Raw prices are never written:
- * only beta statistics and the latest close. If too much fails, nothing is written and the exit code is 1.
+ * Writes public/data/{index.json, market.json, qa.json, companies/*.json}. Raw prices are never written:
+ * only beta statistics and the latest close. If too much fails, or the data checks (scripts/snapshot/qa.ts) say the
+ * extraction looks broken, nothing is written and the exit code is 1.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,6 +14,7 @@ import { regressBeta, type PricePoint } from '../src/lib/finance/capm';
 import { guessIndustry } from '../src/lib/finance/industry';
 import type { CompanyFile, IndexFile, MarketFile, SnapshotBeta } from '../src/lib/finance/types';
 import * as S from './snapshot/sources';
+import { gateFailures, loadExceptions, runQa } from './snapshot/qa';
 
 const OUT = join(process.cwd(), 'public', 'data');
 const COMPANIES = join(OUT, 'companies');
@@ -144,6 +146,7 @@ async function main() {
 
     let beta: SnapshotBeta | null = prev?.beta ? { ...prev.beta, source: 'previous' } : null;
     let price = prev?.price ?? null;
+    let marketCap = prev?.marketCap ?? null;
     if (spy) {
       let px: PricePoint[] | null = null;
       let source: SnapshotBeta['source'] = 'nasdaq';
@@ -162,6 +165,9 @@ async function main() {
           const { stats } = regressBeta(px, spy, 'monthly');
           beta = { ...stats, source, asOf: today };
           price = { close: px.at(-1)!.close, date: px.at(-1)!.date };
+          marketCap = await S.retry(`${c.ticker} market cap`, () => S.nasdaqMarketCap(c.ticker), 2)
+            .then((value) => ({ value, date: price!.date }))
+            .catch((e) => (log('WARN market cap', c.ticker, (e as Error).message), marketCap));
         } catch (e) {
           log('WARN beta', c.ticker, (e as Error).message);
         }
@@ -179,6 +185,7 @@ async function main() {
       facts: trimmed,
       beta,
       price,
+      marketCap,
     });
   }
 
@@ -189,7 +196,31 @@ async function main() {
   if (failRate > 0.05) throw new Error(`Fundamentals failed for ${(failRate * 100).toFixed(1)}% of companies (limit 5%). Nothing written.`);
   if (priceFailRate > 0.25) throw new Error(`Prices failed for ${(priceFailRate * 100).toFixed(1)}% with no previous beta (limit 25%). Nothing written.`);
 
+  /* 6. Data checks: accounting identities in each filing, and a cross-check against Nasdaq's statements. */
+  const refs = new Map<string, S.NasdaqAnnual[] | null>();
+  if (!factsDir) {
+    for (let i = 0; i < results.length; i += 4) {
+      await Promise.all(
+        results.slice(i, i + 4).map(async (r) => {
+          refs.set(r.ticker, await S.retry(`${r.ticker} Nasdaq financials`, () => S.nasdaqFinancials(r.ticker), 2).catch(() => null));
+        }),
+      );
+      await S.sleep(250);
+    }
+  }
+  const qa = runQa(results, market, refs, loadExceptions());
+  const q = qa.summary;
+  log(
+    `Checks: ${q.errors} errors (${q.unexplainedErrors} unexplained), ${q.warnings} warnings. Within 2% of Nasdaq: revenue ${(q.reference.revenue.rate * 100).toFixed(0)}%, net income ${(q.reference.netIncome.rate * 100).toFixed(0)}%, equity ${(q.reference.equity.rate * 100).toFixed(0)}% (no reference for ${q.referenceUnavailable}).`,
+  );
+  const gate = gateFailures(qa);
+  if (gate.length) {
+    writeFileSync(join(tmpdir(), 'qa-failed.json'), JSON.stringify(qa, null, 1));
+    throw new Error(`Data checks failed, nothing written:\n- ${gate.join('\n- ')}`);
+  }
+
   for (const r of results) writeFileSync(fileFor(r.ticker), JSON.stringify(r));
+  writeFileSync(join(OUT, 'qa.json'), JSON.stringify(qa));
   const index: IndexFile = {
     asOf: today,
     companies: (only && prevIndex ? mergeIndex(prevIndex.companies, results) : results).map(({ ticker, name, cik, sector, subIndustry }) => ({ ticker, name, cik, sector, subIndustry })),

@@ -13,12 +13,12 @@ export type LineItem =
   | 'buybacks'
   | 'cash'
   | 'shortTermInvestments'
-  | 'debtCurrent'
-  | 'debtNoncurrent'
+  | 'debt'
   | 'equity'
   | 'sharesOutstanding'
   | 'dilutedShares'
-  | 'sbc';
+  | 'sbc'
+  | 'impairments';
 
 export interface FactValue {
   value: number;
@@ -37,6 +37,8 @@ export interface Historicals {
   yearEnds: string[];
   items: Partial<Record<LineItem, (FactValue | null)[]>>;
   missing: LineItem[];
+  /** Most recent cover-page share count from any 10-K or 10-Q (picks up splits and buybacks after the fiscal year). */
+  latestShares?: FactValue | null;
 }
 
 /** Compact companyfacts: only mapped tags, only annual 10-K rows. */
@@ -78,6 +80,8 @@ export interface CompanyFile {
   facts: TrimmedFacts;
   beta: SnapshotBeta | null;
   price: { close: number; date: string } | null;
+  /** Nasdaq market capitalisation, used only to catch share counts made stale by later splits or mergers. */
+  marketCap?: { value: number; date: string } | null;
 }
 
 export interface IndexFile {
@@ -106,3 +110,27 @@ export interface MarketFile {
   erpSource: string;
   industries: IndustryRow[];
 }
+
+/** Plain-English names for line items, shared by the page and the Excel export. */
+export const LINE_LABELS: Record<LineItem, string> = {
+  revenue: 'Revenue',
+  cogs: 'Cost of revenue',
+  operatingIncome: 'Operating income',
+  da: 'Depreciation & amortisation',
+  interestExpense: 'Interest expense',
+  pretaxIncome: 'Pre-tax income',
+  taxExpense: 'Income tax',
+  netIncome: 'Net income',
+  cfo: 'Cash from operations',
+  capex: 'Capital expenditure',
+  dividendsPaid: 'Dividends paid',
+  buybacks: 'Share buybacks',
+  cash: 'Cash and equivalents',
+  shortTermInvestments: 'Short-term investments',
+  debt: 'Total debt',
+  equity: 'Stockholders equity',
+  sharesOutstanding: 'Shares outstanding',
+  dilutedShares: 'Diluted shares (weighted)',
+  sbc: 'Stock-based compensation',
+  impairments: 'Impairments',
+};

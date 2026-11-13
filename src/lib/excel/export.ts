@@ -1,7 +1,7 @@
 import type ExcelJS from 'exceljs';
 import { cellAddress, toExcel, type Fmt, type Values, type Workbook } from '../finance/calcsheet';
 import type { AlignedReturns } from '../finance/capm';
-import type { Historicals, LineItem } from '../finance/types';
+import { LINE_LABELS, type Historicals, type LineItem } from '../finance/types';
 import type { RunOutput } from '../finance/run';
 
 const NUMFMT: Record<Fmt, string> = {
@@ -17,28 +17,7 @@ const NUMFMT: Record<Fmt, string> = {
 const MAROON = 'FF4A0E0E';
 const CREME = 'FFFDFBF6';
 
-const LABELS: Record<LineItem, string> = {
-  revenue: 'Revenue',
-  cogs: 'Cost of revenue',
-  operatingIncome: 'Operating income',
-  da: 'Depreciation & amortisation',
-  interestExpense: 'Interest expense',
-  pretaxIncome: 'Pre-tax income',
-  taxExpense: 'Income tax',
-  netIncome: 'Net income',
-  cfo: 'Cash from operations',
-  capex: 'Capital expenditure',
-  dividendsPaid: 'Dividends paid',
-  buybacks: 'Share buybacks',
-  cash: 'Cash and equivalents',
-  shortTermInvestments: 'Short-term investments',
-  debtCurrent: 'Debt, current',
-  debtNoncurrent: 'Debt, noncurrent',
-  equity: 'Stockholders equity',
-  sharesOutstanding: 'Shares outstanding',
-  dilutedShares: 'Diluted shares (weighted)',
-  sbc: 'Stock-based compensation',
-};
+const LABELS = LINE_LABELS;
 
 function header(ws: ExcelJS.Worksheet, values: string[]) {
   const r = ws.getRow(1);

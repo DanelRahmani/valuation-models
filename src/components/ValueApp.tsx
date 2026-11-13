@@ -2,11 +2,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { defaultAssumptions, type Assumptions, type Sources } from '@/lib/finance/assumptions';
+import { defaultAssumptions, defaultBetaMethod, MIN_BETA_R2, MIN_INDUSTRY_FIRMS, type Assumptions, type Sources } from '@/lib/finance/assumptions';
 import { evaluate, type ModelId } from '@/lib/finance/calcsheet';
 import { extractHistoricals } from '@/lib/finance/extract';
 import { runAll } from '@/lib/finance/run';
-import type { CompanyFile, Historicals, IndustryRow, MarketFile, SnapshotBeta } from '@/lib/finance/types';
+import { LINE_LABELS, type CompanyFile, type Historicals, type IndustryRow, type MarketFile, type SnapshotBeta } from '@/lib/finance/types';
 import { fmt } from '@/lib/format';
 import { MODEL_NOTES } from '@/content/modelNotes';
 import { ModelCard } from './ModelCard';
@@ -118,7 +118,9 @@ function Valuation({ ticker, h, company, market }: Loaded) {
   const [industry, setIndustry] = useState<string>(company?.industry ?? '');
   const ind: IndustryRow | undefined = industries.find((i) => i.name === industry);
   const [uploaded, setUploaded] = useState<UploadedBeta | null>(null);
-  const [betaChoice, setBetaChoice] = useState<BetaChoice>(company?.beta ? 'regression' : ind ? 'industry' : 'manual');
+  const [betaChoice, setBetaChoice] = useState<BetaChoice>(() =>
+    defaultBetaMethod(company?.beta ?? null, ind?.unleveredBeta != null && company?.price != null ? ind.firms : 0),
+  );
 
   const initial = useMemo(() => {
     const { a, src } = defaultAssumptions(h, {
@@ -127,6 +129,9 @@ function Valuation({ ticker, h, company, market }: Loaded) {
       erp: market?.erp,
       beta: company?.beta ?? null,
       industryBetaU: ind?.unleveredBeta ?? null,
+      industryFirms: ind?.firms ?? null,
+      subIndustry: company?.subIndustry ?? null,
+      marketCap: company?.marketCap ?? null,
     });
     if (company?.price) src.price = `Last close ${company.price.date} (Nasdaq)`;
     if (market) {
@@ -211,7 +216,6 @@ function Valuation({ ticker, h, company, market }: Loaded) {
                   ['Share price', fmt(price, 'usd') || 'enter below'],
                   ['WACC', fmt(I.wacc, 'pct')],
                   ['Cost of equity', fmt(I.re, 'pct')],
-                  ['Beta', fmt(I.beta_l, 'beta')],
                 ] as const
               ).map(([k, v]) => (
                 <div key={k} className="rounded-2xl border border-seam bg-panel/70 px-4 py-2.5">
@@ -220,6 +224,16 @@ function Valuation({ ticker, h, company, market }: Loaded) {
                 </div>
               ))}
             </dl>
+            <HeadlineBetas
+              reg={company?.beta ?? null}
+              industryName={industry}
+              industryFirms={ind?.firms ?? null}
+              relevered={relevered}
+              choice={betaChoice}
+              current={a.beta}
+              suggested={defaultBetaMethod(company?.beta ?? null, ind?.unleveredBeta != null && company?.price != null ? ind.firms : 0)}
+              onPick={setBetaChoice}
+            />
             <div className="mt-6 flex flex-wrap items-center gap-3">
               <button
                 type="button"
@@ -294,29 +308,67 @@ function Valuation({ ticker, h, company, market }: Loaded) {
           </Group>
 
           <Group title="Beta">
-            <div className="space-y-1 py-2 text-sm">
-              {(
-                [
-                  ['regression', `Regression (${company?.beta ? company.beta.beta.toFixed(2) : 'n/a'})`, !!company?.beta],
-                  ['blume', `Blume-adjusted (${company?.beta ? company.beta.blume.toFixed(2) : 'n/a'})`, !!company?.beta],
-                  ['industry', `Industry, relevered (${relevered != null ? relevered.toFixed(2) : 'n/a'})`, relevered != null],
-                  ['upload', `My price files${uploaded ? ` (${uploaded.stats.beta.toFixed(2)})` : ''}`, true],
-                  ['manual', 'Type my own', true],
-                ] as [BetaChoice, string, boolean][]
-              ).map(([k, label, enabled]) => (
-                <label key={k} className={`flex items-center gap-2 ${enabled ? '' : 'opacity-40'}`}>
-                  <input type="radio" name="beta" checked={betaChoice === k} disabled={!enabled} onChange={() => setBetaChoice(k)} className="accent-[rgb(var(--accent))]" />
-                  {label}
-                </label>
-              ))}
+            <div role="radiogroup" aria-label="Beta method" className="space-y-1.5 py-2 text-sm">
+              {(() => {
+                const reg = company?.beta ?? null;
+                const suggested = defaultBetaMethod(reg, ind?.unleveredBeta != null && company?.price != null ? ind.firms : 0);
+                const weak = reg != null && reg.r2 < MIN_BETA_R2;
+                const options: { k: BetaChoice; label: string; beta: number | null; detail: string; enabled: boolean }[] = [
+                  {
+                    k: 'regression',
+                    label: 'Regression vs S&P 500',
+                    beta: reg?.beta ?? null,
+                    detail: reg
+                      ? `R² ${reg.r2.toFixed(2)} · ${reg.n} months · 95% range ${(reg.beta - 1.96 * reg.se).toFixed(2)} to ${(reg.beta + 1.96 * reg.se).toFixed(2)}${weak ? ' · weak fit' : ''}`
+                      : 'No price history',
+                    enabled: !!reg,
+                  },
+                  { k: 'blume', label: 'Blume-adjusted regression', beta: reg?.blume ?? null, detail: '0.67 × regression + 0.33, pulled toward the market', enabled: !!reg },
+                  {
+                    k: 'industry',
+                    label: industry ? `Industry: ${industry}` : 'Industry',
+                    beta: relevered,
+                    detail: ind ? `Damodaran, ${ind.firms} firms, relevered at this company's debt-to-equity${ind.firms < MIN_INDUSTRY_FIRMS ? ' · small sample' : ''}` : 'Pick an industry below',
+                    enabled: relevered != null,
+                  },
+                  { k: 'upload', label: 'My price files', beta: uploaded?.stats.beta ?? null, detail: uploaded ? `R² ${uploaded.stats.r2.toFixed(2)} · ${uploaded.stats.n} periods` : 'Upload stock and index prices', enabled: true },
+                  { k: 'manual', label: 'Type my own', beta: betaChoice === 'manual' ? a.beta : null, detail: 'Edit the levered beta below', enabled: true },
+                ];
+                return options.map((o) => {
+                  const on = betaChoice === o.k;
+                  return (
+                    <button
+                      key={o.k}
+                      type="button"
+                      role="radio"
+                      aria-checked={on}
+                      disabled={!o.enabled}
+                      onClick={() => setBetaChoice(o.k)}
+                      className={`flex w-full items-start gap-3 rounded border px-3 py-2 text-left transition-colors disabled:opacity-40 ${
+                        on ? 'border-[rgb(var(--accent))] bg-[rgb(var(--accent)/0.06)]' : 'border-seam hover:border-muted'
+                      }`}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-center gap-x-2">
+                          <span>{o.label}</span>
+                          {o.k === suggested && <span className="font-mono text-[0.625rem] uppercase tracking-wide text-[rgb(var(--accent))]">suggested</span>}
+                        </span>
+                        <span className="block font-mono text-[0.6875rem] text-muted">{o.detail}</span>
+                      </span>
+                      {o.beta != null && (
+                        <span className="num shrink-0 text-right">
+                          <span className="block">{o.beta.toFixed(2)}</span>
+                          <span className="block font-mono text-[0.625rem] text-muted">re {((a.rf + o.beta * a.erp) * 100).toFixed(1)}%</span>
+                        </span>
+                      )}
+                    </button>
+                  );
+                });
+              })()}
             </div>
-            {company?.beta && (
-              <p className="font-mono text-[0.6875rem] text-muted">
-                Regression: R² {company.beta.r2.toFixed(2)}, 95% interval {(company.beta.beta - 1.96 * company.beta.se).toFixed(2)} to{' '}
-                {(company.beta.beta + 1.96 * company.beta.se).toFixed(2)}
-                {company.beta.r2 < 0.2 ? '. Weak fit: the industry beta is usually the better estimate.' : ''}
-              </p>
-            )}
+            <p className="pb-1 text-xs text-muted">
+              Suggested: the Blume-adjusted regression when R² is at least {MIN_BETA_R2}, otherwise the industry beta (from {MIN_INDUSTRY_FIRMS}+ firms).
+            </p>
             <NumberField label="Levered beta" value={a.beta} fmt="beta" source={src.beta} onChange={(v) => (setBetaChoice('manual'), set('beta', v ?? 1))} step={0.01} />
             <label className="block py-2 text-sm">
               <span>Damodaran industry</span>
@@ -343,11 +395,24 @@ function Valuation({ ticker, h, company, market }: Loaded) {
           </Group>
 
           <Group title="Forecast">
-            <label className="flex items-center justify-between py-2 text-sm">
-              <span>Pre-profit / AI mode</span>
-              <input type="checkbox" checked={a.aiMode} onChange={(e) => set('aiMode', e.target.checked)} className="accent-[rgb(var(--accent))]" />
-            </label>
-            <NumberField label="Revenue growth, years 1-5" value={a.g1} fmt="pct" source={src.g1} onChange={(v) => set('g1', v ?? 0)} />
+            {a.financial ? (
+              <p className="py-2 text-xs text-muted">
+                Bank or insurer: valued on book equity and return on equity. The cash-flow fields below do not apply.
+              </p>
+            ) : (
+              <label className="flex items-center justify-between py-2 text-sm">
+                <span>Pre-profit / AI mode</span>
+                <input type="checkbox" checked={a.aiMode} onChange={(e) => set('aiMode', e.target.checked)} className="accent-[rgb(var(--accent))]" />
+              </label>
+            )}
+            <NumberField
+              label={a.financial ? 'Book equity growth, years 1-5' : 'Revenue growth, years 1-5'}
+              value={a.g1}
+              fmt="pct"
+              source={src.g1}
+              onChange={(v) => set('g1', v ?? 0)}
+            />
+            {a.financial && <NumberField label="Return on equity" value={a.roe} fmt="pct" source={src.roe} onChange={(v) => set('roe', v)} />}
             <NumberField label="Terminal growth" value={a.gT} fmt="pct" source={src.gT} onChange={(v) => set('gT', v ?? 0)} />
             <NumberField label="Operating margin, target" value={a.marginTarget} fmt="pct" source={src.marginTarget} onChange={(v) => set('marginTarget', v)} />
             <NumberField label="Years to reach target" value={a.marginYears} fmt="num" source="Default 5" onChange={(v) => set('marginYears', v ?? 5)} step={1} />
@@ -449,6 +514,63 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
+/**
+ * The three standard beta estimates side by side in the header, so the evidence behind the discount rate is
+ * visible at a glance: the raw regression with its fit, the Blume adjustment, and the industry beta.
+ */
+function HeadlineBetas(p: {
+  reg: SnapshotBeta | null;
+  industryName: string;
+  industryFirms: number | null;
+  relevered: number | null;
+  choice: BetaChoice;
+  current: number;
+  suggested: 'blume' | 'industry' | 'manual';
+  onPick: (c: BetaChoice) => void;
+}) {
+  const weak = p.reg != null && p.reg.r2 < MIN_BETA_R2;
+  const opts: { k: BetaChoice; label: string; beta: number | null; sub: string }[] = [
+    { k: 'regression', label: 'Regression', beta: p.reg?.beta ?? null, sub: p.reg ? `R² ${p.reg.r2.toFixed(2)}${weak ? ', weak fit' : ''}` : 'no data' },
+    { k: 'blume', label: 'Blume-adjusted', beta: p.reg?.blume ?? null, sub: '0.67β + 0.33' },
+    { k: 'industry', label: 'Industry', beta: p.relevered, sub: p.industryFirms ? `${p.industryFirms} firms` : 'no industry' },
+  ];
+  const custom = p.choice === 'manual' || p.choice === 'upload';
+  return (
+    <div className="mt-3 rounded-2xl border border-seam bg-panel/70 px-4 py-2.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="font-mono text-[0.6875rem] text-muted">Beta</span>
+        {custom && <span className="font-mono text-[0.6875rem] text-muted">using your {p.choice === 'upload' ? 'upload' : 'own'} value: {p.current.toFixed(2)}</span>}
+      </div>
+      <div role="radiogroup" aria-label="Beta estimate" className="mt-1.5 grid grid-cols-3 gap-2">
+        {opts.map((o) => {
+          const on = p.choice === o.k;
+          return (
+            <button
+              key={o.k}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              disabled={o.beta == null}
+              onClick={() => p.onPick(o.k)}
+              title={o.k === 'industry' && p.industryName ? `Damodaran ${p.industryName}, relevered at this company's debt-to-equity` : undefined}
+              className={`rounded-xl border px-2.5 py-1.5 text-left transition-colors disabled:opacity-40 ${
+                on ? 'border-[rgb(var(--accent))] bg-[rgb(var(--accent)/0.07)]' : 'border-seam hover:border-muted'
+              }`}
+            >
+              <span className="block text-[0.6875rem] leading-tight">
+                {o.label}
+                {o.k === p.suggested && <span className="ml-1 font-mono text-[0.5625rem] uppercase tracking-wide text-[rgb(var(--accent))]">suggested</span>}
+              </span>
+              <span className="num block text-lg leading-tight">{o.beta != null ? o.beta.toFixed(2) : '–'}</span>
+              <span className="block font-mono text-[0.625rem] leading-tight text-muted">{o.sub}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function HistoricalsTable({ h }: { h: Historicals }) {
   const rows: [keyof Historicals['items'], string][] = [
     ['revenue', 'Revenue'],
@@ -461,7 +583,7 @@ function HistoricalsTable({ h }: { h: Historicals }) {
     ['buybacks', 'Share buybacks'],
     ['cash', 'Cash'],
     ['shortTermInvestments', 'Short-term investments'],
-    ['debtNoncurrent', 'Debt, noncurrent'],
+    ['debt', 'Total debt'],
     ['equity', 'Book equity'],
   ];
   const yrs = h.years.slice(-5);
@@ -498,7 +620,7 @@ function HistoricalsTable({ h }: { h: Historicals }) {
           </tbody>
         </table>
       </div>
-      {h.missing.length > 0 && <p className="mt-2 text-xs text-muted">Not reported in the latest 10-K: {h.missing.join(', ')}.</p>}
+      {h.missing.length > 0 && <p className="mt-2 text-xs text-muted">Not reported in the latest 10-K: {h.missing.map((k) => LINE_LABELS[k].toLowerCase()).join(', ')}.</p>}
     </section>
   );
 }
