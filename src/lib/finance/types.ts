@@ -101,6 +101,7 @@ export interface MarketFile {
   asOf: string;
   rf: number;
   rfDate: string;
+  rfSource?: string;
   erp: number;
   erpSource: string;
   industries: IndustryRow[];

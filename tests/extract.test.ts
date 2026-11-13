@@ -9,7 +9,7 @@ describe('extract', () => {
     const h = extractHistoricals(json);
     const idx = h.years.indexOf(2025);
     expect(idx).toBeGreaterThanOrEqual(0);
-    expect(h.items.revenue[idx]?.value).toBe(130497000000);
-    expect(h.items.revenue[idx]?.tag).toBe('Revenues');
+    expect(h.items.revenue![idx]?.value).toBe(130497000000);
+    expect(h.items.revenue![idx]?.tag).toBe('Revenues');
   });
 });

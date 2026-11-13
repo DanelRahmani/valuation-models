@@ -128,7 +128,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
     });
     if (company?.price) src.price = `Last close ${company.price.date} (Nasdaq)`;
     if (market) {
-      src.rf = `10-year Treasury, ${market.rfDate} (FRED)`;
+      src.rf = `10-year Treasury, ${market.rfDate} (${market.rfSource ?? 'FRED'})`;
       src.erp = market.erpSource;
     }
     if (ind) {

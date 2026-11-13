@@ -23,7 +23,7 @@ export async function retry<T>(label: string, fn: () => Promise<T>, tries = 3): 
 }
 
 async function get(url: string, headers: Record<string, string> = {}): Promise<Response> {
-  const r = await fetch(url, { headers: { 'User-Agent': BROWSER_UA, ...headers } });
+  const r = await fetch(url, { headers: { 'User-Agent': BROWSER_UA, ...headers }, signal: AbortSignal.timeout(30_000) });
   if (!r.ok) throw new Error(`${r.status} ${url}`);
   return r;
 }
@@ -118,7 +118,7 @@ export async function yahooPrices(ticker: string): Promise<PricePoint[]> {
   const res = j?.chart?.result?.[0];
   const ts: number[] = res?.timestamp ?? [];
   const cl: (number | null)[] = res?.indicators?.adjclose?.[0]?.adjclose ?? res?.indicators?.quote?.[0]?.close ?? [];
-  const out = ts.map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: cl[i] ?? NaN })).filter((p) => Number.isFinite(p.close));
+  const out = ts.map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: Math.round((cl[i] ?? NaN) * 100) / 100 })).filter((p) => Number.isFinite(p.close));
   if (out.length < 200) throw new Error(`Yahoo ${ticker}: ${out.length} rows`);
   return out;
 }
@@ -189,11 +189,23 @@ export async function damodaranErp(): Promise<{ erp: number; label: string }> {
   return { erp: last[c], label: `Damodaran implied ERP, end of ${last[0]}` };
 }
 
+/** 10-year par yield from the US Treasury's daily yield curve file (public domain). */
+export async function treasuryGov10y(): Promise<{ rate: number; date: string; source: string }> {
+  const y = new Date().getUTCFullYear();
+  const url = `https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/${y}/all?type=daily_treasury_yield_curve&field_tdr_date_value=${y}&page&_format=csv`;
+  const lines = (await (await get(url)).text()).trim().split(/\r?\n/);
+  const header = lines[0].split(',').map((h) => h.replace(/"/g, ''));
+  const c = header.indexOf('10 Yr');
+  const row = lines[1]?.split(',');
+  if (c < 0 || !row || !Number.isFinite(Number(row[c]))) throw new Error('10 Yr column not found');
+  return { rate: Number(row[c]) / 100, date: isoFromUs(row[0]), source: 'US Treasury daily par yield curve' };
+}
+
 /** 10-year Treasury constant-maturity yield from FRED (public domain). */
-export async function treasury10y(): Promise<{ rate: number; date: string }> {
+export async function treasury10y(): Promise<{ rate: number; date: string; source: string }> {
   const txt = await (await get('https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10')).text();
   const rows = txt.trim().split(/\r?\n/).slice(1).map((l) => l.split(',')).filter((r) => Number.isFinite(Number(r[1])) && r[1] !== '');
   const last = rows.at(-1);
   if (!last) throw new Error('No DGS10 rows');
-  return { rate: Number(last[1]) / 100, date: last[0] };
+  return { rate: Number(last[1]) / 100, date: last[0], source: 'FRED DGS10' };
 }

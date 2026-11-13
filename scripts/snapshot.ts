@@ -45,10 +45,14 @@ async function main() {
   log(`Constituents: ${list.length}`);
 
   /* 2. Market-wide data: Treasury yield, ERP, Damodaran industries. Previous values on failure. */
-  const rf = await S.retry('10y Treasury', S.treasury10y).catch((e) => {
-    log('WARN', e.message);
-    return prevMarket ? { rate: prevMarket.rf, date: prevMarket.rfDate } : { rate: 0.042, date: 'default' };
-  });
+  const rf = await S.retry('10y Treasury (treasury.gov)', S.treasuryGov10y, 2)
+    .catch((e) => (log('WARN', e.message), S.retry('10y Treasury (FRED)', S.treasury10y, 2)))
+    .catch((e) => {
+      log('WARN', e.message, '- keeping previous rate');
+      return prevMarket
+        ? { rate: prevMarket.rf, date: prevMarket.rfDate, source: prevMarket.rfSource ?? 'previous run' }
+        : { rate: 0.042, date: 'default', source: 'Default' };
+    });
   const erp = await S.retry('ERP', S.damodaranErp).catch((e) => {
     log('WARN', e.message);
     return prevMarket ? { erp: prevMarket.erp, label: prevMarket.erpSource } : { erp: 0.045, label: 'Default 4.5%' };
@@ -57,7 +61,7 @@ async function main() {
     log('WARN', e.message);
     return prevMarket?.industries ?? [];
   });
-  const market: MarketFile = { asOf: today, rf: rf.rate, rfDate: rf.date, erp: erp.erp, erpSource: erp.label, industries };
+  const market: MarketFile = { asOf: today, rf: rf.rate, rfDate: rf.date, rfSource: rf.source, erp: erp.erp, erpSource: erp.label, industries };
   log(`rf ${rf.rate} (${rf.date}), ERP ${erp.erp}, industries ${industries.length}`);
 
   /* 3. Fundamentals: bulk zip first, per-company fallback, local directory for development. */
