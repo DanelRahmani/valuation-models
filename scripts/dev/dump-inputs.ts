@@ -1,0 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { extractHistoricals } from '../../src/lib/finance/extract';
+import { defaultAssumptions } from '../../src/lib/finance/assumptions';
+import { runAll } from '../../src/lib/finance/run';
+const c = JSON.parse(readFileSync('public/data/companies/NVDA.json', 'utf8'));
+const m = JSON.parse(readFileSync('public/data/market.json', 'utf8'));
+const h = extractHistoricals(c.facts);
+const { a, src } = defaultAssumptions(h, { price: c.price.close, rf: m.rf, erp: m.erp, beta: c.beta });
+const o = runAll(h, a, src);
+console.log(JSON.stringify({ i: o.values.inputs, fcff: o.results.find((r) => r.id === 'fcff')!.perShare }));
