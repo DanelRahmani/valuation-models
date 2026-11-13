@@ -67,10 +67,19 @@ The output is a mathematical valuation under the user's assumptions. It is never
 - **Cost of equity (CAPM):** risk-free rate + β × equity risk premium.
   - Risk-free: the user's 10-year Treasury yield.
   - ERP: default from Damodaran's current implied ERP, editable, with the source and date shown.
-- **Beta, three ways:**
-  1. **Bottom-up (default):** the Damodaran industry unlevered beta (a small static table embedded in the site, credited, dated), relevered with the company's D/E from the filing and the share price.
-  2. **User-entered:** for example, Yahoo's beta.
-  3. **Regression:** optional upload of a price CSV for the stock plus an index (any source with Date and Close columns). The site computes the beta from monthly returns.
+- **Beta (company-specific regression is the default):**
+  1. **Regression beta (primary).** The user downloads two free CSVs from Nasdaq.com's historical-quotes page (no account needed): the stock and SPY as the market proxy. They upload both, and the site computes:
+     - beta by OLS on monthly returns (default 5 years / 60 months, with a weekly 2-year option);
+     - R², the standard error of beta and a 95% confidence interval;
+     - the Blume-adjusted beta (0.67β + 0.33);
+     - a scatter plot with the regression line.
+     Raw beta is unlevered at the historical D/E and relevered at the current D/E from the filing.
+     - **CSV parser:** auto-detects the Nasdaq format (`Date, Close/Last, …` with `$` signs) and also accepts Yahoo, Stooq or any `Date,Close` file.
+     - Prices are aligned on month-end dates. Gaps are flagged, never filled in.
+     - **Dividends:** price-only returns, which is standard practice. The UI notes this.
+  2. **Bottom-up cross-check.** Damodaran's industry unlevered beta (a small static table embedded in the site, credited and dated), relevered with the company's D/E. It's shown next to the regression beta. When R² is low or the confidence interval is wide, the UI suggests the bottom-up beta.
+  3. **Manual override,** for example Yahoo's beta.
+  - The Excel export includes a `Beta` sheet with the aligned returns and live `SLOPE`, `RSQ` and `STEYX` formulas.
 - **WACC:** E/(D+E)·Re + D/(D+E)·Rd·(1−t).
   - Rd = interest expense / average debt from the filing, which the user can override.
   - t = effective tax rate from the filing.
