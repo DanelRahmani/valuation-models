@@ -74,18 +74,34 @@ export interface CompanyFile {
   name: string;
   sector: string;
   subIndustry: string;
+  industry: string;
   facts: TrimmedFacts;
   beta: SnapshotBeta | null;
+  price: { close: number; date: string } | null;
 }
 
 export interface IndexFile {
   asOf: string;
   companies: { ticker: string; name: string; cik: string; sector: string; subIndustry: string }[];
+  failures: string[];
+}
+
+export interface IndustryRow {
+  name: string;
+  firms: number;
+  unleveredBeta: number | null;
+  pe: number | null;
+  evEbitda: number | null;
+  evSales: number | null;
+  pb: number | null;
+  peg: number | null;
 }
 
 export interface MarketFile {
   asOf: string;
+  rf: number;
+  rfDate: string;
   erp: number;
   erpSource: string;
-  industries: { name: string; unleveredBeta: number; firms: number }[];
+  industries: IndustryRow[];
 }
