@@ -54,6 +54,14 @@ export async function sp500(): Promise<Constituent[]> {
 
 /* ------------------------------------ SEC ----------------------------------- */
 
+/** SEC's official ticker -> CIK map. Tickers use '-' for share classes (BRK-B). */
+export async function secTickerMap(ua: string): Promise<Map<string, string>> {
+  const r = await fetch('https://www.sec.gov/files/company_tickers.json', { headers: { 'User-Agent': ua }, signal: AbortSignal.timeout(30_000) });
+  if (!r.ok) throw new Error(`SEC ticker map ${r.status}`);
+  const j = (await r.json()) as Record<string, { cik_str: number; ticker: string }>;
+  return new Map(Object.values(j).map((x) => [x.ticker.toUpperCase(), String(x.cik_str).padStart(10, '0')]));
+}
+
 /** Download the nightly bulk file and return the JSON of the wanted CIKs only. */
 export async function secBulk(ua: string, ciks: Set<string>, tmpFile: string): Promise<Map<string, unknown>> {
   const r = await fetch('https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip', { headers: { 'User-Agent': ua } });

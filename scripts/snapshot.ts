@@ -64,8 +64,11 @@ async function main() {
   const market: MarketFile = { asOf: today, rf: rf.rate, rfDate: rf.date, rfSource: rf.source, erp: erp.erp, erpSource: erp.label, industries };
   log(`rf ${rf.rate} (${rf.date}), ERP ${erp.erp}, industries ${industries.length}`);
 
-  /* 3. Fundamentals: bulk zip first, per-company fallback, local directory for development. */
-  const wanted = new Set(list.map((c) => c.cik));
+  /* 3. Fundamentals: bulk zip first, per-company fallback, local directory for development.
+        Each ticker may have two candidate CIKs (the list's and SEC's own map); the one with annual data wins. */
+  const secMap = factsDir ? new Map<string, string>() : await S.retry('SEC ticker map', () => S.secTickerMap(ua!)).catch((e) => (log('WARN', e.message), new Map<string, string>()));
+  const candidates = new Map(list.map((c) => [c.ticker, [...new Set([secMap.get(c.ticker.replace('.', '-')), c.cik].filter((x): x is string => !!x))]]));
+  const wanted = new Set([...candidates.values()].flat());
   let facts = new Map<string, unknown>();
   if (factsDir) {
     for (const f of readdirSync(factsDir).filter((f) => f.endsWith('.json'))) {
@@ -107,8 +110,19 @@ async function main() {
   const results: CompanyFile[] = [];
   for (const c of list) {
     const prev = readJson<CompanyFile>(fileFor(c.ticker));
-    const raw = facts.get(c.cik);
-    let trimmed = raw ? trimCompanyfacts(raw) : prev?.facts;
+    let cik = c.cik;
+    let trimmed: CompanyFile['facts'] | undefined;
+    for (const k of candidates.get(c.ticker) ?? [c.cik]) {
+      const raw = facts.get(k);
+      if (!raw) continue;
+      const t = trimCompanyfacts(raw);
+      if (extractHistoricals(t).years.length) {
+        trimmed = t;
+        cik = k;
+        break;
+      }
+    }
+    trimmed ??= prev?.facts;
     if (!trimmed) {
       failures.push(c.ticker);
       log('FAIL fundamentals', c.ticker);
@@ -153,7 +167,7 @@ async function main() {
 
     results.push({
       ticker: c.ticker,
-      cik: c.cik,
+      cik,
       name: c.name,
       sector: c.sector,
       subIndustry: c.subIndustry,
