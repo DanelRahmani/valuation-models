@@ -1,7 +1,7 @@
 import { Suspense } from 'react';
 import ValueApp from '@/components/ValueApp';
 
-export const metadata = { title: 'Valuation · Valuation Models' };
+export const metadata = { title: 'Valuation' };
 
 export default function ValuePage() {
   return (

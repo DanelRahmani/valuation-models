@@ -15,7 +15,7 @@ export function CalcTable({ sheet, wb, values }: { sheet: SheetDef; wb: Workbook
         <table className="num w-full border-collapse text-[0.8125rem]">
           <thead>
             <tr className="border-b border-seam text-muted">
-              <th className="sticky left-0 bg-bg py-1.5 pr-4 text-left font-sans text-xs font-normal">{sheet.rows.some((r) => r.fmt === 'usdm') ? '$ millions' : ''}</th>
+              <th className="sticky left-0 bg-panel py-1.5 pr-4 text-left font-sans text-xs font-normal">{sheet.rows.some((r) => r.fmt === 'usdm') ? '$ millions' : ''}</th>
               {sheet.columns.map((c) => (
                 <th key={c} className="px-2 py-1.5 text-right font-normal">
                   {c}
@@ -26,7 +26,7 @@ export function CalcTable({ sheet, wb, values }: { sheet: SheetDef; wb: Workbook
           <tbody>
             {sheet.rows.map((r) => (
               <tr key={r.key} className={`border-b border-seam/60 ${r.emphasis ? 'font-semibold' : ''}`}>
-                <td className="sticky left-0 min-w-[15rem] bg-bg py-1.5 pr-4 font-sans" title={r.note}>
+                <td className="sticky left-0 min-w-[15rem] bg-panel py-1.5 pr-4 font-sans" title={r.note}>
                   {r.label}
                   {r.note && <span className="ml-1 text-accent">*</span>}
                 </td>
@@ -92,13 +92,16 @@ export function ModelCard({
   const note = MODEL_NOTES[sheet.id];
   const ok = sheet.status === 'ok' && perShare != null;
   return (
-    <article className="border-t border-seam py-8">
+    <article className="group relative mb-5 rounded-[1.5rem] border border-seam bg-panel/60 p-6 sm:p-7">
+      <svg aria-hidden className="card-stitch pointer-events-none absolute inset-0 h-full w-full">
+        <rect x="1" y="1" rx="23" />
+      </svg>
       <div className="flex flex-wrap items-baseline justify-between gap-4">
-        <h3 className="font-serif text-2xl">{sheet.title}</h3>
+        <h3 className="font-serif text-2xl sm:text-3xl">{sheet.title}</h3>
         <div className="text-right">
           {ok ? (
             <>
-              <div className="num text-2xl">{fmt(perShare, 'usd')}</div>
+              <div className="num text-3xl text-accent">{fmt(perShare, 'usd')}</div>
               {price != null && <div className="font-mono text-[0.6875rem] text-muted">{((perShare! / price - 1) * 100).toFixed(0)}% vs price</div>}
             </>
           ) : (
@@ -124,7 +127,7 @@ export function ModelCard({
         </dl>
       )}
       {extra}
-      <button type="button" onClick={() => setOpen(!open)} className="link mt-5 text-sm" aria-expanded={open}>
+      <button type="button" onClick={() => setOpen(!open)} className="relative mt-5 rounded-full border border-seam px-4 py-1.5 text-sm text-accent transition-colors hover:bg-panel-strong" aria-expanded={open}>
         {open ? 'Hide calculations' : 'Show calculations'}
       </button>
       {open && (

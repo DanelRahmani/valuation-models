@@ -10,7 +10,9 @@ import type { CompanyFile, Historicals, IndustryRow, MarketFile, SnapshotBeta } 
 import { fmt } from '@/lib/format';
 import { MODEL_NOTES } from '@/content/modelNotes';
 import { ModelCard } from './ModelCard';
-import { FootballField, SensitivityGrid, type FieldRow } from './Charts';
+import { FootballField, HistoryChart, SensitivityGrid, type FieldRow } from './Charts';
+import { RandomCompanyButton } from './RandomCompany';
+import { prettyName } from '@/lib/names';
 import { BetaResult, BetaUpload, type UploadedBeta } from './BetaPanel';
 import { Badge, Label, NumberField, ReadOnly, Seam } from './ui';
 
@@ -194,35 +196,68 @@ function Valuation({ ticker, h, company, market }: Loaded) {
 
   return (
     <div>
-      <section className="pt-8">
-        <Label>
-          {ticker ? `${ticker} · ` : ''}CIK {h.cik} · FY{h.years.at(-1)} 10-K{company ? ` · ${company.sector}` : ''}
-        </Label>
-        <h1 className="mt-3 font-serif text-4xl sm:text-5xl">{titleCase(h.name)}</h1>
-        <div className="mt-6 flex flex-wrap items-end gap-x-12 gap-y-4">
+      <section className="relative pt-12">
+        <div aria-hidden className="hero-vignette absolute -inset-x-24 -top-10 bottom-0" />
+        <div className="relative grid gap-10 lg:grid-cols-[1fr_360px] lg:items-end">
           <div>
-            <Label>Share price</Label>
-            <div className="num text-2xl">{fmt(price, 'usd') || 'enter below'}</div>
+            <Label>
+              {ticker ? `${ticker} · ` : ''}CIK {h.cik} · FY{h.years.at(-1)} 10-K{company ? ` · ${company.sector}` : ''}
+            </Label>
+            <h1 className="mt-4 font-serif text-5xl italic leading-[1.02] sm:text-6xl">{prettyName(h.name)}</h1>
+            <div aria-hidden className="mt-5 h-px w-40 bg-accent/70" />
+            <dl className="mt-8 flex flex-wrap gap-3">
+              {(
+                [
+                  ['Share price', fmt(price, 'usd') || 'enter below'],
+                  ['WACC', fmt(I.wacc, 'pct')],
+                  ['Cost of equity', fmt(I.re, 'pct')],
+                  ['Beta', fmt(I.beta_l, 'beta')],
+                ] as const
+              ).map(([k, v]) => (
+                <div key={k} className="rounded-2xl border border-seam bg-panel/70 px-4 py-2.5">
+                  <dt className="font-mono text-[0.6875rem] text-muted">{k}</dt>
+                  <dd className="num text-xl">{v}</dd>
+                </div>
+              ))}
+            </dl>
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={exportXlsx}
+                disabled={busy}
+                className="rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-bg shadow-[0_8px_24px_-8px_rgba(74,14,14,0.5)] transition-colors hover:bg-accent-hover"
+              >
+                {busy ? 'Building workbook…' : 'Download Excel model'}
+              </button>
+              <RandomCompanyButton current={ticker} />
+            </div>
           </div>
-          <div>
-            <Label>WACC</Label>
-            <div className="num text-2xl">{fmt(I.wacc, 'pct')}</div>
-          </div>
-          <div>
-            <Label>Cost of equity</Label>
-            <div className="num text-2xl">{fmt(I.re, 'pct')}</div>
-          </div>
-          <div className="ml-auto flex gap-3">
-            <button type="button" onClick={exportXlsx} disabled={busy} className="rounded bg-accent px-4 py-2 text-sm text-bg transition-colors hover:bg-accent-hover">
-              {busy ? 'Building workbook…' : 'Download Excel (live formulas)'}
-            </button>
-          </div>
+          <figure>
+            <HistoryChart
+              years={h.years.slice(-8)}
+              revenue={(h.items.revenue ?? []).slice(-8).map((v) => v?.value ?? null)}
+              fcf={h.years.slice(-8).map((_, i, arr) => {
+                const k = h.years.length - arr.length + i;
+                const cfo = h.items.cfo?.[k]?.value;
+                const capex = h.items.capex?.[k]?.value;
+                return cfo != null ? cfo - (capex ?? 0) : null;
+              })}
+            />
+            <figcaption className="mt-1 flex gap-4 font-mono text-[0.6875rem] text-muted">
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm bg-panel-strong ring-1 ring-[var(--seam)]" /> revenue
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm bg-accent" /> free cash flow
+              </span>
+            </figcaption>
+          </figure>
         </div>
       </section>
 
-      <section className="mt-10 rounded border border-seam bg-panel/50 px-5 py-5">
+      <section className="mt-12 rounded-[1.5rem] border border-seam bg-panel/70 px-6 py-6">
         <Label>Reverse DCF</Label>
-        <p className="mt-2 font-serif text-2xl leading-snug">
+        <p className="mt-3 font-serif text-2xl leading-snug sm:text-3xl">
           {out.reverse.growth != null && price != null ? (
             <>
               To justify {fmt(price, 'usd')}, revenue must grow about <span className="text-accent">{fmt(out.reverse.growth, 'pct')}</span> a year for five
@@ -239,8 +274,12 @@ function Valuation({ ticker, h, company, market }: Loaded) {
         ))}
       </section>
 
-      <section className="mt-10">
-        <FootballField rows={field} price={price} />
+      <section className="mt-14">
+        <h2 className="font-serif text-3xl">Where the methods land</h2>
+        <p className="mt-1 text-sm text-muted">Each bar moves the discount rate one point either way; the tick is the central value.</p>
+        <div className="mt-6">
+          <FootballField rows={field} price={price} />
+        </div>
       </section>
 
       <div className="mt-12 grid gap-12 lg:grid-cols-[340px_1fr]">
@@ -507,10 +546,3 @@ function buildField(out: ReturnType<typeof runAll>, a: Assumptions): FieldRow[] 
   }
   return rows;
 }
-
-const titleCase = (s: string) =>
-  s
-    .toLowerCase()
-    .replace(/\b([a-z])/g, (c) => c.toUpperCase())
-    .replace(/\b(Corp|Inc|Co|Ltd|Plc)\b/g, (w) => w)
-    .replace(/\bNvidia\b/, 'NVIDIA');

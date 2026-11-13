@@ -56,10 +56,6 @@ export function FootballField({ rows, price }: { rows: FieldRow[]; price: number
           </g>
         )}
       </svg>
-      <figcaption className="mt-2 text-xs text-muted">
-        Bars show each method&apos;s range (sensitivity grid, dividend variants or scenarios); the tick is the central value. The dashed line is the share
-        price, shown for reference.
-      </figcaption>
     </figure>
   );
 }
@@ -139,6 +135,45 @@ export function BetaScatter({ a, stats }: { a: AlignedReturns; stats: BetaStats 
       <text x={8} y={14} className="fill-muted font-mono text-[10px]">
         stock return
       </text>
+    </svg>
+  );
+}
+
+
+/** Revenue (pale) with free cash flow inside it (maroon), per fiscal year. Bars rise on load. */
+export function HistoryChart({ years, revenue, fcf }: { years: number[]; revenue: (number | null)[]; fcf: (number | null)[] }) {
+  const n = years.length;
+  if (!n) return null;
+  const W = 360;
+  const H = 150;
+  const base = H - 22;
+  const max = Math.max(1, ...revenue.map((v) => v ?? 0));
+  const step = (W - 10) / n;
+  const bw = Math.min(30, step - 8);
+  const y = (v: number) => base - (Math.max(0, v) / max) * (base - 8);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Revenue and free cash flow by fiscal year">
+      <line x1={0} x2={W} y1={base} y2={base} stroke="var(--seam-color)" strokeDasharray="4 4" />
+      {years.map((yr, i) => {
+        const x = 5 + i * step + (step - bw) / 2;
+        const r = revenue[i] ?? 0;
+        const f = fcf[i];
+        return (
+          <g key={yr}>
+            <rect className="dcf-bar fill-panel-strong" x={x} y={y(r)} width={bw} height={base - y(r)} rx={2} style={{ animationDelay: `${i * 50}ms` }}>
+              <title>{`FY${yr} revenue $${(r / 1e9).toFixed(1)}B`}</title>
+            </rect>
+            {f != null && f > 0 && (
+              <rect className="dcf-bar fill-accent" x={x + bw * 0.22} y={y(f)} width={bw * 0.56} height={base - y(f)} rx={1.5} style={{ animationDelay: `${400 + i * 50}ms` }}>
+                <title>{`FY${yr} free cash flow $${(f / 1e9).toFixed(1)}B`}</title>
+              </rect>
+            )}
+            <text x={x + bw / 2} y={H - 6} textAnchor="middle" className="fill-muted font-mono text-[9px]">
+              {`'${String(yr).slice(2)}`}
+            </text>
+          </g>
+        );
+      })}
     </svg>
   );
 }

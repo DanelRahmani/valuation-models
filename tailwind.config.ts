@@ -13,6 +13,7 @@ export default {
       colors: {
         bg: 'rgb(var(--bg) / <alpha-value>)',
         panel: 'rgb(var(--panel) / <alpha-value>)',
+        'panel-strong': 'rgb(var(--panel-strong) / <alpha-value>)',
         ink: 'rgb(var(--ink) / <alpha-value>)',
         muted: 'rgb(var(--muted) / <alpha-value>)',
         accent: 'rgb(var(--accent) / <alpha-value>)',
