@@ -4,3 +4,4 @@ out/
 .vercel/
 *.tsbuildinfo
 desktop.ini
+.superpowers/
