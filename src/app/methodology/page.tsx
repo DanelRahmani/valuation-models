@@ -1,6 +1,7 @@
+import { pageMeta } from '../_og/site';
 import { GitHubIcon } from '@/components/SiteNav';
 
-export const metadata = { title: 'Methodology' };
+export const metadata = { title: 'Methodology', ...pageMeta('/methodology/', 'Methodology · Valuation Models') };
 
 const SECTIONS = [
   ['data', 'Data'],
