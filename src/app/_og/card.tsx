@@ -1,14 +1,9 @@
 import { ImageResponse } from 'next/og';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { OG_ALT } from './_og/site';
 
-// Site-wide link preview (LinkedIn, Slack, WhatsApp, X). Rendered once at build time.
-export const alt = OG_ALT;
-export const size = { width: 1200, height: 630 };
-export const contentType = 'image/png';
-// Static export: render once at build time.
-export const dynamic = 'force-static';
+// Site-wide link-preview card (LinkedIn, Slack, WhatsApp, X), served as /og.png by app/og.png/route.tsx.
+export const OG_SIZE = { width: 1200, height: 630 };
 
 // Same tokens as globals.css (light theme): creme cloth, maroon thread.
 const BG = '#FDFBF6';
@@ -19,7 +14,7 @@ const ACCENT = '#4A0E0E';
 
 const font = (f: string) => readFile(join(process.cwd(), 'src', 'app', '_og', f));
 
-export default async function Image() {
+export async function renderCard() {
   const [bodoniItalic, bodoni, geist, geistMono] = await Promise.all([
     font('bodoni-moda-500-italic.woff'),
     font('bodoni-moda-500-normal.woff'),
@@ -77,7 +72,7 @@ export default async function Image() {
       </div>
     ),
     {
-      ...size,
+      ...OG_SIZE,
       fonts: [
         { name: 'BodoniItalic', data: bodoniItalic, style: 'italic', weight: 500 },
         { name: 'Bodoni', data: bodoni, style: 'normal', weight: 500 },

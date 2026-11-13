@@ -8,8 +8,7 @@ import './globals.css';
 
 const display = Bodoni_Moda({ subsets: ['latin'], style: ['normal', 'italic'], variable: '--font-display' });
 
-// The og/twitter images come from app/opengraph-image.tsx and app/twitter-image.tsx; Next adds their
-// og:image, size, type and alt tags, resolved against metadataBase to absolute URLs.
+// Link-preview tags (pageMeta) resolve against metadataBase to absolute URLs; the card image is /og.png.
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: { default: SITE_TITLE, template: '%s · Valuation Models' },
