@@ -67,7 +67,11 @@ async function main() {
   /* 3. Fundamentals: bulk zip first, per-company fallback, local directory for development.
         Each ticker may have two candidate CIKs (the list's and SEC's own map); the one with annual data wins. */
   const secMap = factsDir ? new Map<string, string>() : await S.retry('SEC ticker map', () => S.secTickerMap(ua!)).catch((e) => (log('WARN', e.message), new Map<string, string>()));
-  const candidates = new Map(list.map((c) => [c.ticker, [...new Set([secMap.get(c.ticker.replace('.', '-')), c.cik].filter((x): x is string => !!x))]]));
+  const overrides = readJson<Record<string, string[] | string>>(join(process.cwd(), 'scripts', 'snapshot', 'cik-overrides.json')) ?? {};
+  const extra = (t: string) => (Array.isArray(overrides[t]) ? (overrides[t] as string[]) : []);
+  const candidates = new Map(
+    list.map((c) => [c.ticker, [...new Set([secMap.get(c.ticker.replace('.', '-')), c.cik, ...extra(c.ticker)].filter((x): x is string => !!x))]]),
+  );
   const wanted = new Set([...candidates.values()].flat());
   let facts = new Map<string, unknown>();
   if (factsDir) {

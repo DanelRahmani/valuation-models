@@ -1,0 +1,4 @@
+{
+  "_comment": "Extra CIKs to try when a ticker's current SEC entity has no 10-K yet (re-domiciled holding companies, mergers). The candidate with annual data wins.",
+  "XOM": ["0000034088"]
+}
