@@ -3,15 +3,18 @@ import { Bodoni_Moda } from 'next/font/google';
 import { GeistSans } from 'geist/font/sans';
 import { GeistMono } from 'geist/font/mono';
 import { SiteNav } from '@/components/SiteNav';
+import { SITE_DESCRIPTION, SITE_TITLE, SITE_URL, pageMeta } from './_og/site';
 import './globals.css';
 
 const display = Bodoni_Moda({ subsets: ['latin'], style: ['normal', 'italic'], variable: '--font-display' });
 
+// The og/twitter images come from app/opengraph-image.tsx and app/twitter-image.tsx; Next adds their
+// og:image, size, type and alt tags, resolved against metadataBase to absolute URLs.
 export const metadata: Metadata = {
-  title: { default: 'Valuation Models · Danel Rahmani', template: '%s · Valuation Models' },
-  description: 'Eight valuation models for every S&P 500 company, built from SEC filings, with every formula visible and an Excel export.',
-  metadataBase: new URL('https://valuation.danelrahmani.com'),
-  openGraph: { title: 'Valuation Models', description: 'What is a company worth, and what would you have to believe?', url: '/', siteName: 'Valuation Models' },
+  metadataBase: new URL(SITE_URL),
+  title: { default: SITE_TITLE, template: '%s · Valuation Models' },
+  description: SITE_DESCRIPTION,
+  ...pageMeta('/'),
 };
 
 // Apply the saved theme before first paint, falling back to the system setting.
