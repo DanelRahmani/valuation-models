@@ -17,6 +17,10 @@ export function ValueCreation({ h, tax, wacc, re, financial, name }: { h: Histor
   const hurdle = financial ? re : wacc;
   const last = series.at(-1);
   const spread = last?.roic != null && hurdle != null ? last.roic - hurdle : null;
+  // When ROIC is meaningless in every year (a company that has always held more cash than it ties up), chart return
+  // on equity against the cost of equity instead of an empty chart.
+  const useRoe = !financial && series.length > 0 && series.every((p) => p.roic == null) && series.some((p) => p.roe != null);
+  const chartSeries = useRoe ? series.map((p) => ({ ...p, roic: p.roe })) : series;
   return (
     <section aria-labelledby="vc-title">
       <h2 id="vc-title" className="font-serif text-3xl">
@@ -24,7 +28,13 @@ export function ValueCreation({ h, tax, wacc, re, financial, name }: { h: Histor
       </h2>
       <p className="mt-1 max-w-2xl text-sm text-muted">
         A company creates value only when it earns more on its capital than that capital costs. {name}{' '}
-        {spread == null ? (
+        {last?.roicNm ? (
+          <>
+            has so much cash, or so little book equity, that the capital it actually ties up in the business is close to zero, so return on invested
+            capital is <strong className="font-semibold text-ink">not meaningful</strong> (it would be in the hundreds of percent). The operating margin and
+            return on equity{last.roe != null ? <> ({pct(last.roe)} last year)</> : null} say more here.
+          </>
+        ) : spread == null ? (
           'does not report enough to tell for the latest year.'
         ) : (
           <>
@@ -42,12 +52,22 @@ export function ValueCreation({ h, tax, wacc, re, financial, name }: { h: Histor
       <div className="mt-8 grid gap-10 lg:grid-cols-2">
         <figure>
           <figcaption className="mb-2 text-sm">
-            {financial ? 'Return on equity' : 'Return on invested capital'} vs {financial ? 'cost of equity' : 'WACC'}
+            {useRoe || financial ? 'Return on equity' : 'Return on invested capital'} vs {useRoe || financial ? 'cost of equity' : 'WACC'}
           </figcaption>
-          <ReturnChart series={series} hurdle={hurdle} />
+          <ReturnChart series={chartSeries} hurdle={useRoe ? re : hurdle} />
           <p className="mt-2 font-mono text-[0.6875rem] text-muted">
-            {financial ? 'Net income / book equity.' : 'Operating income after tax / (equity + debt − cash).'} The dashed line is today&apos;s{' '}
-            {financial ? 'cost of equity' : 'WACC'}.
+            {useRoe
+              ? 'Net income / book equity, shown because return on invested capital is not meaningful in any year here.'
+              : financial
+                ? 'Net income / book equity.'
+                : 'Operating income after tax / (equity + debt − cash).'}{' '}
+            The dashed line is today&apos;s {useRoe || financial ? 'cost of equity' : 'WACC'}.
+            {!useRoe &&
+              series.some((p) => p.roicNm) &&
+              ` Gaps: ${series
+                .filter((p) => p.roicNm)
+                .map((p) => `FY${p.year}`)
+                .join(', ')}, where cash or negative equity leaves too little invested capital for the ratio to mean anything.`}
           </p>
         </figure>
         <figure>

@@ -180,6 +180,12 @@ function CompareTable({ tickers, data, runs, onRemove }: { tickers: string[]; da
       label: 'Return on capital',
       note: 'vs WACC',
       cell: (v, out) => {
+        if (m(v.company.ticker)?.roicNm)
+          return (
+            <span title="Cash or negative equity leaves almost no invested capital, so the ratio would be meaningless">
+              n/m<span className="block font-mono text-[0.625rem] text-muted">too little capital</span>
+            </span>
+          );
         const r = m(v.company.ticker)?.roic;
         const w = v.financial ? out.values.inputs.re : out.values.inputs.wacc;
         return (

@@ -86,7 +86,9 @@ export function Peers({ ticker, onUseMultiples, usingPeers }: { ticker: string; 
                     {r.label}
                     <span className="block font-mono text-[0.625rem] text-muted">{r.note}</span>
                   </td>
-                  <td className="num py-2 text-right">{r.f(mine)}</td>
+                  <td className="num py-2 text-right" title={r.k === 'roic' && me?.roicNm ? 'Not meaningful: cash or negative equity leaves almost no invested capital' : undefined}>
+                    {r.k === 'roic' && me?.roicNm ? 'n/m' : r.f(mine)}
+                  </td>
                   <td className="num py-2 text-right text-muted">{r.f(median(vals))}</td>
                   <td className="py-2 pl-6">
                     <Strip mine={mine} vals={vals} label={`${r.label}: ${ticker} ranks ${rankText(percentile(mine, vals))}`} />

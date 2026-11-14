@@ -18,6 +18,10 @@ export interface CompanyMetrics {
   growth: number | null;
   /** After-tax operating income / (equity + debt - cash). Return on equity for banks and insurers. */
   roic: number | null;
+  /** True when invested capital is too small for ROIC to mean anything (cash about equals book capital). */
+  roicNm: boolean;
+  /** Net income / book equity. */
+  roe: number | null;
   /** Net debt / EBITDA. Not meaningful for banks and insurers. */
   leverage: number | null;
   evEbitda: number | null;
@@ -39,10 +43,21 @@ export function medianGrowth(h: Historicals): number | null {
   return g.length ? g[Math.floor(g.length / 2)] : null;
 }
 
+/**
+ * When cash cancels out most of a company's capital, invested capital (equity + debt - cash) is a sliver and ROIC
+ * stops measuring anything: Palantir's cash almost equals its book equity, which would show 655%. ROIC is reported as
+ * not meaningful when invested capital is under this share of gross capital (book equity, if positive, plus debt).
+ * Measured against capital, not revenue, so thin-margin, high-turnover businesses such as Costco are not caught.
+ */
+export const ROIC_MIN_CAPITAL_SHARE = 0.25;
+
 export interface YearPoint {
   year: number;
-  /** After-tax return on invested capital (or on equity for financials). */
+  /** After-tax return on invested capital (or on equity for financials). Null when not meaningful. */
   roic: number | null;
+  /** ROIC is not meaningful this year: invested capital is under 25% of gross capital, or not positive. */
+  roicNm: boolean;
+  roe: number | null;
   dividends: number;
   buybacks: number;
   capex: number;
@@ -69,13 +84,21 @@ export function valueCreationSeries(h: Historicals, tax: number, financial = fal
     const interest = at('interestExpense', i);
     const sbc = at('sbc', i);
     const invested = ok(equity) ? equity + debt - cash : null;
+    const roe = ok(ni) && ok(equity) && equity > 0 ? ni / equity : null;
     let roic: number | null = null;
-    if (financial) roic = ok(ni) && ok(equity) && equity > 0 ? ni / equity : null;
-    else if (ok(ebit) && invested != null && invested > 0) roic = (ebit * (1 - tax)) / invested;
+    let roicNm = false;
+    if (financial) roic = roe;
+    else if (ok(ebit) && invested != null) {
+      const gross = Math.max(0, equity ?? 0) + debt;
+      roicNm = invested <= 0 || gross <= 0 || invested < ROIC_MIN_CAPITAL_SHARE * gross;
+      if (!roicNm) roic = (ebit * (1 - tax)) / invested;
+    }
     const ebitda = ok(ebit) ? ebit + da : null;
     return {
       year,
       roic,
+      roicNm,
+      roe,
       dividends: Math.abs(at('dividendsPaid', i) ?? 0),
       buybacks: Math.abs(at('buybacks', i) ?? 0),
       capex: Math.abs(at('capex', i) ?? 0),
@@ -112,6 +135,8 @@ export function computeMetrics(
     margin: !o.financial && ok(rev) && rev > 0 && ok(ebit) ? ebit / rev : null,
     growth: medianGrowth(h),
     roic: last?.roic ?? null,
+    roicNm: last?.roicNm ?? false,
+    roe: last?.roe ?? null,
     leverage: last?.leverage ?? null,
     evEbitda: !o.financial && mcap != null && ebitda && ebitda > 0 ? (mcap + debt - cash) / ebitda : null,
     evSales: !o.financial && mcap != null && rev && rev > 0 ? (mcap + debt - cash) / rev : null,
@@ -215,5 +240,7 @@ export function percentile(value: number | null, peers: (number | null)[]): numb
 export function peerMultiples(ticker: string, group: PeerGroup, metrics: Map<string, CompanyMetrics>) {
   const peers = group.members.filter((t) => t !== ticker).map((t) => metrics.get(t)).filter((m): m is CompanyMetrics => !!m);
   const med = (k: 'pe' | 'evEbitda' | 'evSales' | 'pb', cap = 100) => median(peers.map((p) => p[k]).filter((x): x is number => ok(x) && x > 0 && x < cap));
-  return { pe: med('pe'), evEbitda: med('evEbitda'), evSales: med('evSales', 50), pb: med('pb', 50), count: peers.length };
+  const margin = median(peers.map((p) => p.margin).filter((x): x is number => ok(x) && x > -1 && x < 1));
+  const roe = median(peers.map((p) => p.roe).filter((x): x is number => ok(x) && x > -1 && x < 2));
+  return { pe: med('pe'), evEbitda: med('evEbitda'), evSales: med('evSales', 50), pb: med('pb', 50), margin, roe, count: peers.length };
 }

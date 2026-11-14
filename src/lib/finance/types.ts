@@ -98,6 +98,10 @@ export interface IndustryRow {
   pe: number | null;
   evEbitda: number | null;
   evSales: number | null;
+  /** Industry pre-tax operating margin, to scale EV/Sales to the company's own margin. */
+  operatingMargin?: number | null;
+  /** Industry return on equity, to scale P/B to the company's own return. */
+  roe?: number | null;
   pb: number | null;
   peg: number | null;
 }

@@ -194,6 +194,8 @@ export interface Industry {
   pe: number | null;
   evEbitda: number | null;
   evSales: number | null;
+  operatingMargin: number | null;
+  roe: number | null;
   pb: number | null;
   peg: number | null;
 }
@@ -214,7 +216,11 @@ export async function damodaranIndustries(): Promise<Industry[]> {
   const pegM = pick(pe, /^PEG Ratio$/i);
   const evM = pick(ev, /^EV\/EBITDA$/i);
   const esM = pick(ps, /^EV\/Sales$/i);
+  // Pre-tax operating margin, published next to EV/Sales: a revenue multiple is only fair at a similar margin.
+  const omM = pick(ps, /^Pre-tax Operating Margin$/i);
   const pbM = pick(pb, /^PBV$/i);
+  // Return on equity, published next to P/B: a book multiple is only fair at a similar return on that book.
+  const roeM = pick(pb, /^ROE$/i);
   return beta.rows
     .filter((r) => !/^Total Market/i.test(r[0]))
     .map((r) => ({
@@ -224,6 +230,8 @@ export async function damodaranIndustries(): Promise<Industry[]> {
       pe: peM.get(r[0]) ?? null,
       evEbitda: evM.get(r[0]) ?? null,
       evSales: esM.get(r[0]) ?? null,
+      operatingMargin: omM.get(r[0]) ?? null,
+      roe: roeM.get(r[0]) ?? null,
       pb: pbM.get(r[0]) ?? null,
       peg: pegM.get(r[0]) ?? null,
     }));

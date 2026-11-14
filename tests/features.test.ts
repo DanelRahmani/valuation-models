@@ -5,6 +5,7 @@ import { extractHistoricals } from '../src/lib/finance/extract';
 import { defaultAssumptions } from '../src/lib/finance/assumptions';
 import { groupOf, median, peerGroup, percentile, valueCreationSeries } from '../src/lib/finance/metrics';
 import { applyShare, decodeShare, encodeShare } from '../src/lib/share';
+import { runAll } from '../src/lib/finance/run';
 
 const fixture = (t: string) => JSON.parse(readFileSync(join(__dirname, 'fixtures', 'companies', `${t}.json`), 'utf8'));
 
@@ -61,6 +62,48 @@ describe('value creation', () => {
     const last = valueCreationSeries(h, 0.21, true).at(-1)!;
     expect(last.roic).toBeGreaterThan(0.1);
     expect(last.leverage).toBeNull();
+  });
+});
+
+describe('return on capital that is not meaningful', () => {
+  it('flags Palantir, whose cash almost equals its book equity, and falls back to return on equity', () => {
+    const h = extractHistoricals(fixture('PLTR').facts);
+    const last = valueCreationSeries(h, 0.21).at(-1)!;
+    expect(last.roicNm).toBe(true);
+    expect(last.roic).toBeNull();
+    expect(last.roe).toBeGreaterThan(0.1);
+  });
+  it('keeps a normal ROIC for a company with real invested capital (AMD)', () => {
+    const last = valueCreationSeries(extractHistoricals(fixture('AMD').facts), 0.21).at(-1)!;
+    expect(last.roicNm).toBe(false);
+    expect(last.roic).toBeGreaterThan(0);
+  });
+});
+
+describe('multiples for a loss-making company (Intel)', () => {
+  const h = extractHistoricals(fixture('INTC').facts);
+  const { a, src } = defaultAssumptions(h, { price: 61.2, rf: 0.051, erp: 0.042 });
+  // Semiconductor averages: P/E 49x, EV/EBITDA 35x, EV/Sales 15.7x at a 35% margin, P/B 13x at a 30% ROE.
+  a.peers = { pe: 48.8, evEbitda: 34.8, evSales: 15.7, pb: 13.3, peg: 2.1, margin: 0.353, roe: 0.3 };
+  const out = runAll(h, a, src);
+  const v = out.values.sheets.Multiples;
+  it('skips EV/Sales when the operating margin is negative', () => expect(v.ev_sales[2]).toBeNull());
+  it('skips P/B when the return on equity is negative', () => expect(v.pb[2]).toBeNull());
+  it('says when the value rests on one multiple', () => {
+    const r = out.results.find((x) => x.id === 'multiples')!;
+    const used = ['pe', 'ev_ebitda', 'ev_sales', 'pb', 'peg'].filter((k) => v[k]?.[2] != null);
+    if (used.length === 1) expect(r.sheet.message).toMatch(/one multiple only/);
+  });
+});
+
+describe('margin-adjusted EV/Sales', () => {
+  it('scales the peer multiple by margin, at most 1.5x up', () => {
+    const h = extractHistoricals(fixture('MCD').facts);
+    const { a, src } = defaultAssumptions(h, { price: 300, rf: 0.045, erp: 0.045 });
+    a.peers = { pe: 25, evEbitda: 15, evSales: 4, pb: 5, peg: 2, margin: 0.1, roe: 0.2 };
+    const v = runAll(h, a, src).values.sheets.Multiples;
+    // McDonald's margin is about 45%, far above the 10% peer margin, so the multiple is capped at 1.5 x 4.
+    expect(v.ev_sales[1]).toBeCloseTo(6, 6);
   });
 });
 
