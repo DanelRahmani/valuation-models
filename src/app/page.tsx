@@ -18,7 +18,7 @@ export default function Home() {
   return (
     <>
       <section className="relative pb-14 pt-14 sm:pt-20">
-        <div aria-hidden className="hero-vignette absolute -inset-x-24 -top-10 bottom-0" />
+        <div aria-hidden className="hero-vignette absolute inset-x-0 -top-10 bottom-0 lg:-inset-x-24" />
         <div className="relative">
           <p className="font-mono text-xs text-muted">S&amp;P 500 · SEC filings · refreshed monthly</p>
           <h1 className="mt-5 max-w-3xl font-serif text-5xl italic leading-[1.02] tracking-[-0.01em] sm:text-7xl">

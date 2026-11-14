@@ -24,6 +24,8 @@ export interface QaFile {
     referenceUnavailable: number;
   };
   companies: Record<string, CheckIssue[]>;
+  /** Per company: relative gap to Nasdaq for each compared item (0.01 = 1%), for the data-quality badge. */
+  reference: Record<string, Partial<Record<'revenue' | 'netIncome' | 'equity', number>>>;
 }
 
 /** Thresholds below which the snapshot is not published. Measured Nov 2026: revenue 97%, net income 96%, equity 99%. */
@@ -41,6 +43,8 @@ export function runQa(
   exceptions: Record<string, Record<string, string>>,
 ): QaFile {
   const out: QaFile['companies'] = {};
+  const refGaps: QaFile['reference'] = {};
+  const gap = (a: number | null, b: number | null | undefined) => (a == null || b == null || b === 0 ? undefined : Math.round((Math.abs(a - b) / Math.abs(b)) * 1e4) / 1e4);
   const pairs = { revenue: [] as [number | null, number | null][], netIncome: [] as [number | null, number | null][], equity: [] as [number | null, number | null][] };
   let errors = 0;
   let unexplained = 0;
@@ -61,6 +65,8 @@ export function runQa(
       if (!financial) pairs.revenue.push([latest(h, 'revenue'), ref.revenue]);
       pairs.netIncome.push([latest(h, 'netIncome'), ref.netIncome]);
       pairs.equity.push([latest(h, 'equity'), ref.equity]);
+      const g = { revenue: financial ? undefined : gap(latest(h, 'revenue'), ref.revenue), netIncome: gap(latest(h, 'netIncome'), ref.netIncome), equity: gap(latest(h, 'equity'), ref.equity) };
+      refGaps[c.ticker] = Object.fromEntries(Object.entries(g).filter(([, v]) => v !== undefined));
     } else noRef++;
 
     for (const i of issues) {
@@ -86,6 +92,7 @@ export function runQa(
       referenceUnavailable: noRef,
     },
     companies: out,
+    reference: refGaps,
   };
 }
 

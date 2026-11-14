@@ -49,6 +49,8 @@ export const TAG_MAP: Record<LineItem, string[]> = {
   dilutedShares: ['WeightedAverageNumberOfDilutedSharesOutstanding'],
   sbc: ['ShareBasedCompensation', 'AllocatedShareBasedCompensationExpense'],
   impairments: [],
+  // Cash paid for acquisitions, for the "where the cash went" chart.
+  acquisitions: ['PaymentsToAcquireBusinessesNetOfCashAcquired', 'PaymentsToAcquireBusinessesGross'],
 };
 
 /**
@@ -346,7 +348,7 @@ export function extractHistoricals(raw: unknown, nYears = 10): Historicals {
       });
     }
     items[item] = arr;
-    if (arr.at(-1) == null && item !== 'impairments') missing.push(item);
+    if (arr.at(-1) == null && item !== 'impairments' && item !== 'acquisitions') missing.push(item);
   }
 
   // Share counts filed in the wrong scale (McDonald's files diluted shares as 711 rather than 711 million; Packaging

@@ -10,6 +10,7 @@ const SECTIONS = [
   ['forecast', 'Forecast'],
   ['models', 'The models'],
   ['financials', 'Banks and insurers'],
+  ['peers', 'Peers and value creation'],
   ['validation', 'Validation'],
   ['consistency', 'Consistency'],
   ['ai', 'Valuing AI companies'],
@@ -279,6 +280,20 @@ export default function Methodology() {
           <p className="mt-4">
             Peer multiples come from Damodaran&apos;s industry averages. P/E is aggregate market cap over the net income of profitable firms: the simple
             average P/E is blown up by firms with tiny earnings (pharma reads 335× on it, 25× on this).
+          </p>
+
+          <H2 id="peers">Peers and value creation</H2>
+          <p className="mt-4">
+            Peers come from the S&amp;P 500 itself. A company is grouped with its GICS sub-industry; small sub-industries are folded in with their
+            closest neighbours (automakers with parts makers, airlines with railroads and freight, REITs together), and only a dozen companies with no
+            close neighbour fall back to their sector. Two share classes of one company count once. The multiples model can use the median of these peers
+            instead of Damodaran&apos;s industry averages; multiples above 100× (50× for EV/Sales and P/B) are dropped as outliers.
+          </p>
+          <F>ROIC = operating income × (1 - t) / (equity + debt - cash)</F>
+          <p className="mt-4">
+            A company creates value only when its return on invested capital beats its WACC. The value-creation tab shows that spread over ten years, where
+            the cash went (capex, acquisitions, dividends, buybacks), stock pay as a share of revenue, net debt to EBITDA and interest coverage. Banks and
+            insurers are shown on return on equity against the cost of equity.
           </p>
 
           <H2 id="validation">Checked against an independent source</H2>

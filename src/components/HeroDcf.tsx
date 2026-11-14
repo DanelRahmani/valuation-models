@@ -1,10 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { defaultAssumptions } from '@/lib/finance/assumptions';
-import { extractHistoricals } from '@/lib/finance/extract';
-import { runAll } from '@/lib/finance/run';
-import type { CompanyFile, MarketFile } from '@/lib/finance/types';
+import { valueTicker } from '@/lib/valuate';
 import { fmt } from '@/lib/format';
 import { DiceIcon, loadIndex, pickRandom } from './RandomCompany';
 import { prettyName } from '@/lib/names';
@@ -22,26 +19,11 @@ interface Example {
   baseYear: number;
 }
 
-let marketP: Promise<MarketFile | null> | null = null;
-const loadMarket = () => (marketP ??= fetch('/data/market.json').then((r) => (r.ok ? r.json() : null)).catch(() => null));
-
-/** Value a company with the same engine as the valuation page; null if its FCFF model is not meaningful. */
+/** Value a company with the same engine and defaults as the valuation page; null if its FCFF model is not meaningful. */
 async function buildExample(ticker: string): Promise<Example | null> {
-  const [market, company] = await Promise.all([
-    loadMarket(),
-    fetch(`/data/companies/${ticker}.json`).then((r) => (r.ok ? (r.json() as Promise<CompanyFile>) : null)),
-  ]);
-  if (!company) return null;
-  const h = extractHistoricals(company.facts);
-  const ind = market?.industries.find((i: { name: string }) => i.name === company.industry);
-  const { a, src } = defaultAssumptions(h, {
-    price: company.price?.close ?? null,
-    rf: market?.rf,
-    erp: market?.erp,
-    beta: company.beta,
-    industryBetaU: ind?.unleveredBeta ?? null,
-  });
-  const out = runAll(h, a, src);
+  const v = await valueTicker(ticker);
+  if (!v) return null;
+  const { h, out, company } = v;
   const r = out.results.find((x) => x.id === 'fcff');
   const s = out.values.sheets.FCFF;
   if (!r || r.status !== 'ok' || r.perShare == null || r.perShare <= 0) return null;

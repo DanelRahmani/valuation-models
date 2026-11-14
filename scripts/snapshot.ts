@@ -2,7 +2,7 @@
  * Monthly data snapshot. Run by .github/workflows/snapshot.yml, or locally:
  *   SEC_USER_AGENT="Name contact@example.com" npx tsx scripts/snapshot.ts [--only NVDA,AAPL] [--skip-prices] [--facts-dir DIR]
  *
- * Writes public/data/{index.json, market.json, qa.json, companies/*.json}. Raw prices are never written:
+ * Writes public/data/{index.json, market.json, qa.json, metrics.json, companies/*.json}. Raw prices are never written:
  * only beta statistics and the latest close. If too much fails, or the data checks (scripts/snapshot/qa.ts) say the
  * extraction looks broken, nothing is written and the exit code is 1.
  */
@@ -15,6 +15,7 @@ import { guessIndustry } from '../src/lib/finance/industry';
 import type { CompanyFile, IndexFile, MarketFile, SnapshotBeta } from '../src/lib/finance/types';
 import * as S from './snapshot/sources';
 import { gateFailures, loadExceptions, runQa } from './snapshot/qa';
+import { buildMetrics } from './snapshot/metrics';
 
 const OUT = join(process.cwd(), 'public', 'data');
 const COMPANIES = join(OUT, 'companies');
@@ -221,6 +222,7 @@ async function main() {
 
   for (const r of results) writeFileSync(fileFor(r.ticker), JSON.stringify(r));
   writeFileSync(join(OUT, 'qa.json'), JSON.stringify(qa));
+  writeFileSync(join(OUT, 'metrics.json'), JSON.stringify(buildMetrics(results, market)));
   const index: IndexFile = {
     asOf: today,
     companies: (only && prevIndex ? mergeIndex(prevIndex.companies, results) : results).map(({ ticker, name, cik, sector, subIndustry }) => ({ ticker, name, cik, sector, subIndustry })),

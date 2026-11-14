@@ -34,6 +34,10 @@ html {
   background: rgb(var(--bg));
   color: rgb(var(--ink));
 }
+/* The hero vignette bleeds past the content edges on purpose; never let it cause sideways scrolling. */
+body {
+  overflow-x: clip;
+}
 h1,
 h2,
 h3 {
@@ -135,6 +139,23 @@ p {
 }
 .fade-up {
   animation: fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Story mode: the dialog fills the screen; a hairline fills while a step plays. */
+dialog.story[open] {
+  animation: fade-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+dialog.story::backdrop {
+  background: rgb(var(--ink) / 0.35);
+}
+@keyframes progress {
+  from {
+    transform: scaleX(0);
+  }
+}
+.story-progress {
+  transform-origin: left;
+  animation: progress linear both;
 }
 
 @media (prefers-reduced-motion: reduce) {
