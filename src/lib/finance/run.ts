@@ -1,7 +1,7 @@
 import { inputDefs, type Assumptions, type Sources } from './assumptions';
 import { evaluate, resultOf, type ModelId, type SheetDef, type Values, type Workbook } from './calcsheet';
 import { latest } from './extract';
-import { apvSheet, ddmSheets, fcfeSheet, fcffSheet, multiplesSheet, riFinancialSheet, riSheet, scenarioSheets } from './models';
+import { apvSheet, ddmSheets, totalPayoutSheet, fcfeSheet, fcffSheet, multiplesSheet, riFinancialSheet, riSheet, scenarioSheets } from './models';
 import type { Historicals } from './types';
 
 export interface ModelResult {
@@ -31,11 +31,15 @@ export function buildWorkbook(h: Historicals, a: Assumptions, src: Sources): Wor
     apvSheet(baseYear),
     a.financial ? riFinancialSheet(baseYear) : riSheet(baseYear),
     ...ddmSheets(),
+    totalPayoutSheet(),
     multiplesSheet(a, ebitda0),
   ];
   if (a.aiMode) sheets.push(...scenarioSheets(a, baseYear));
   return { inputs: inputDefs(a, src, h), sheets };
 }
+
+/** Below this share of earnings paid out, dividends say little about value and the dividend models are skipped. */
+export const MIN_DDM_PAYOUT = 0.2;
 
 /** Set model statuses from the evaluated inputs: things the formulas alone cannot judge. */
 function judge(wb: Workbook, v: Values, a: Assumptions): string[] {
@@ -50,7 +54,7 @@ function judge(wb: Workbook, v: Values, a: Assumptions): string[] {
     if (miss.length) for (const id of ids) set(id, 'needs-input', `Needs: ${miss.map((k) => wb.inputs.find((d) => d.key === k)?.label ?? k).join(', ')}`);
   };
   const dcfIds: ModelId[] = ['fcff', 'fcfe', 'apv', 'ri', 'fcff_bear', 'fcff_base', 'fcff_bull', 'scenarios'];
-  needs(['price', 'shares'], [...dcfIds, 'ddm_gordon', 'ddm_2stage', 'ddm_h', 'multiples']);
+  needs(['price', 'shares'], [...dcfIds, 'ddm_gordon', 'ddm_2stage', 'ddm_h', 'total_payout', 'multiples']);
   if (a.financial) {
     const msg = 'Banks and insurers borrow to fund operations, so debt is raw material, not financing: enterprise-value models do not apply. Use residual income, dividends, P/E and P/B.';
     for (const id of ['fcff', 'fcfe', 'apv', 'fcff_bear', 'fcff_base', 'fcff_bull', 'scenarios'] as ModelId[]) set(id, 'na', msg);
@@ -67,10 +71,27 @@ function judge(wb: Workbook, v: Values, a: Assumptions): string[] {
     if (r != null && r <= gT) for (const id of ids) set(id, 'na', `The discount rate (${(r * 100).toFixed(1)}%) must exceed terminal growth.`);
   };
   guard('wacc', ['fcff', 'fcff_bear', 'fcff_base', 'fcff_bull', 'scenarios']);
-  guard('re', ['fcfe', 'ri', 'ddm_gordon', 'ddm_2stage', 'ddm_h']);
+  guard('re', ['fcfe', 'ri', 'ddm_gordon', 'ddm_2stage', 'ddm_h', 'total_payout']);
   guard('ru', ['apv']);
 
-  if (!(a.dps0 && a.dps0 > 0)) for (const id of ['ddm_gordon', 'ddm_2stage', 'ddm_h'] as ModelId[]) set(id, 'na', 'The company pays no dividend, so dividend models do not apply.');
+  const ddmIds = ['ddm_gordon', 'ddm_2stage', 'ddm_h'] as ModelId[];
+  if (!(a.dps0 && a.dps0 > 0)) for (const id of ddmIds) set(id, 'na', 'The company pays no dividend, so dividend models do not apply.');
+  else if (a.payout < MIN_DDM_PAYOUT)
+    for (const id of ddmIds)
+      set(
+        id,
+        'na',
+        `Dividends are only ${(a.payout * 100).toFixed(0)}% of earnings, so a dividend model would value the token payout, not the business.${
+          (a.totalPayout ?? 0) >= MIN_DDM_PAYOUT ? ' The total payout model below counts buybacks too.' : ''
+        }`,
+      );
+  if (a.totalPayout == null) set('total_payout', 'na', 'Net income over the last three years is not positive, so there are no earnings to pay out.');
+  else if (a.totalPayout < MIN_DDM_PAYOUT)
+    set(
+      'total_payout',
+      'na',
+      `The company returns only ${(a.totalPayout * 100).toFixed(0)}% of earnings to shareholders (dividends plus buybacks, net of stock pay). It reinvests the rest, so payouts say little about its value.`,
+    );
   if (a.aiMode) {
     const p = (i.prob_bear ?? 0) + (i.prob_base ?? 0) + (i.prob_bull ?? 0);
     if (Math.abs(p - 1) > 0.001) set('scenarios', 'needs-input', `Probabilities add up to ${(p * 100).toFixed(0)}%, not 100%.`);
@@ -83,6 +104,22 @@ function judge(wb: Workbook, v: Values, a: Assumptions): string[] {
   const mc = i.mcap;
   if (!a.financial && nd != null && mc != null && mc > 0 && nd > 2 * mc)
     warnings.push(`Net debt is ${(nd / mc).toFixed(1)}× the market value of equity. Equity is a thin slice of the firm, so a small change in enterprise value is a large change per share.`);
+
+  if (a.capexMissing && !a.financial)
+    warnings.push(
+      'Capital spending is not tagged in this company’s SEC data, so it is assumed equal to depreciation. Utilities, REITs and other growing asset-heavy firms usually spend more; enter capex from the 10-K cash flow statement for a sharper answer.',
+    );
+  // Shares carry limited liability: a model that values the equity below zero has found that the cash flows do not cover
+  // the claims ahead of shareholders, not a negative share price.
+  for (const id of ['fcff', 'fcfe', 'apv', 'ri', 'total_payout'] as ModelId[]) {
+    const ps = resultOf(wb, v, id);
+    if (ps != null && ps < 0)
+      set(
+        id,
+        'na',
+        `This model comes out at minus $${Math.abs(ps).toFixed(2)} a share: on these assumptions the cash flows do not cover what is owed ahead of shareholders. A share cannot be worth less than zero, so the result is set aside; the margin and growth assumptions decide whether that is fair.`,
+      );
+  }
 
   const fcff = wb.sheets.find((s) => s.id === 'fcff')!;
   const tvShare = v.sheets.FCFF.tv_share?.[0];
@@ -137,11 +174,12 @@ export function runAll(h: Historicals, a: Assumptions, src: Sources): RunOutput 
     );
   const interest = latest(h, 'interestExpense');
   // Debt found but far below what the interest bill implies (segment-tagged debt at Deere or Caterpillar's finance arms).
-  if (a.debt > 0 && interest != null && interest / 1e6 / (a.rf + 0.03) > 2 * a.debt)
+  // Banks and insurers pay interest on deposits and policy funds, not just debt, so these checks do not apply to them.
+  if (!a.financial && a.debt > 0 && interest != null && interest / 1e6 / (a.rf + 0.03) > 2 * a.debt)
     warnings.push(
       `Interest expense of $${(interest / 1e6).toFixed(0)}M suggests more debt than the $${a.debt.toFixed(0)}M found in the SEC data, which may miss debt reported by segment (a finance arm, for example). Check the 10-K balance sheet.`,
     );
-  if (!a.debt && interest != null && a.rev0 && interest / 1e6 > 0.002 * a.rev0)
+  if (!a.financial && !a.debt && interest != null && a.rev0 && interest / 1e6 > 0.002 * a.rev0)
     warnings.push(
       `No debt was found in the SEC data, yet the company paid $${(interest / 1e6).toFixed(0)}M of interest. Enter total debt from the 10-K balance sheet before trusting the equity value.`,
     );

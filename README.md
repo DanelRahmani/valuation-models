@@ -6,7 +6,7 @@ Type an S&P 500 ticker and get eight valuation methods side by side, built from 
 
 - FCFF DCF, FCFE DCF and APV
 - Residual income
-- Dividend discount models: Gordon, two-stage and H-model
+- Dividend discount models: Gordon, two-stage and H-model, plus a total payout model that counts buybacks
 - Multiples
 - Reverse DCF
 - A scenario-weighted mode for pre-profit and AI companies
@@ -14,6 +14,8 @@ Type an S&P 500 ticker and get eight valuation methods side by side, built from 
 Every number on the site can be clicked to show its formula, in words and in Excel syntax. The whole model downloads as an Excel workbook with live formulas.
 
 > Mathematical valuations under stated assumptions. Not investment advice.
+>
+> The defaults that move answers most (growth capped at 20%, when the dividend models run, missing capex, negative values) and the known limitations are written up under [Limits and judgment calls](https://valuation.danelrahmani.com/methodology/#limits).
 
 ## What makes it different
 

@@ -30,6 +30,10 @@ export interface Assumptions {
   ni0: number | null;
   dps0: number | null;
   payout: number;
+  /** Share of earnings returned to shareholders as dividends plus buybacks, net of stock-based pay (3-yr pooled, 0-1). */
+  totalPayout: number | null;
+  /** True when no capital spending was found in the filings and capex was set equal to D&A. */
+  capexMissing?: boolean;
   hHalfLife: number;
   /** Peer multiples, plus the peers' operating margin that their EV/Sales goes with. */
   peers: { pe: number | null; evEbitda: number | null; evSales: number | null; pb: number | null; peg: number | null; margin?: number | null; roe?: number | null };
@@ -59,6 +63,21 @@ function avgRatio(h: Historicals, num: LineItem, den: LineItem, n = 3): number |
   const b = lastN(h, den, n);
   const r = a.map((x, i) => x / b[i]).filter((x) => Number.isFinite(x));
   return r.length ? r.reduce((x, y) => x + y, 0) / r.length : null;
+}
+
+/** Sum of the numerator over sum of the denominator across the last n years: one bad year cannot swing it the way an average of yearly ratios can. */
+function pooledRatio(h: Historicals, num: LineItem, den: LineItem, n = 3): number | null {
+  const a = lastN(h, num, n);
+  const b = lastN(h, den, n);
+  let sa = 0;
+  let sb = 0;
+  a.forEach((x, i) => {
+    if (Number.isFinite(x) && Number.isFinite(b[i])) {
+      sa += Math.abs(x);
+      sb += b[i];
+    }
+  });
+  return sb > 0 ? sa / sb : null;
 }
 
 /** Below this R², stock returns say too little about market risk and the industry beta is used instead. */
@@ -214,16 +233,35 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
   src.gT = 'Long-run nominal growth, capped at the risk-free rate';
 
   const daPct = avgRatio(h, 'da', 'revenue') ?? 0.04;
-  const capexPct = avgRatio(h, 'capex', 'revenue') ?? 0.05;
+  // No capex tag (common for utilities and REITs, which report spending under company-specific tags): assume the company
+  // spends what it depreciates, the least a business must spend to keep its assets. A flat 5% would flatter
+  // capital-heavy firms whose depreciation alone is a quarter of revenue.
+  const capexAvg = avgRatio(h, 'capex', 'revenue');
+  const capexMissing = capexAvg == null;
+  const capexPct = capexAvg ?? daPct;
   src.daPct = '3-yr average';
-  src.capexPct = '3-yr average';
+  src.capexPct = capexMissing ? 'Not tagged in the SEC data: assumed equal to D&A' : '3-yr average';
   src.nwcPct = 'Default: 10% of each new dollar of revenue';
 
   const div = latest(h, 'dividendsPaid');
   const dps0 = div != null && shares ? div / M / shares : null;
   src.dps0 = div != null ? `${tagOf('dividendsPaid')} / shares` : 'No dividends reported';
-  const payout = clamp(avgRatio(h, 'dividendsPaid', 'netIncome') ?? 0, 0, 1);
-  src.payout = '3-yr dividends / net income';
+  const payout = clamp(pooledRatio(h, 'dividendsPaid', 'netIncome') ?? 0, 0, 1);
+  src.payout = '3-yr dividends / 3-yr net income';
+  // Total payout: what shareholders actually receive. Buybacks that only soak up shares issued as employee pay return
+  // nothing, so stock-based compensation is netted out. Pooled over three years because buybacks are lumpy.
+  const z = (x: number) => (Number.isFinite(x) ? Math.abs(x) : 0);
+  const [tpDiv, tpBuy, tpSbc, tpNi] = (['dividendsPaid', 'buybacks', 'sbc', 'netIncome'] as LineItem[]).map((k) => lastN(h, k));
+  const niSum = tpNi.reduce((s, x) => s + (Number.isFinite(x) ? x : 0), 0);
+  const paid = tpNi.reduce((s, _, i) => s + z(tpDiv[i]) + z(tpBuy[i]) - z(tpSbc[i]), 0);
+  // Capped at 100% of earnings, except that it never falls below the dividends actually paid: REITs and some utilities
+  // pay out more than accounting earnings because depreciation is non-cash, and that payout is real.
+  const divSum = tpNi.reduce((s, _, i) => s + z(tpDiv[i]), 0);
+  const totalPayout = niSum > 0 ? Math.max(clamp(paid / niSum, 0, 1), divSum / niSum) : null;
+  src.totalPayout =
+    niSum > 0 && divSum / niSum > 1
+      ? '3-yr dividends / net income: dividends exceed accounting earnings'
+      : '3-yr (dividends + buybacks - stock-based pay) / net income, capped at 100%';
 
   const ebitda = ebit != null ? ebit + (latest(h, 'da') ?? 0) : null;
   src.exitMultiple = 'Default 12x EBITDA';
@@ -275,6 +313,8 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
     ni0: ni != null ? ni / M : null,
     dps0,
     payout,
+    totalPayout,
+    capexMissing,
     hHalfLife: 5,
     peers: { pe: null, evEbitda: null, evSales: null, pb: null, peg: null },
     aiMode: false,
@@ -316,6 +356,7 @@ export function inputDefs(a: Assumptions, src: Sources, h: Historicals): InputDe
     I('ni_0', 'Net income, last fiscal year ($M)', a.ni0, 'usdm', 'Company', 'Latest 10-K'),
     I('equity_0', 'Book equity ($M)', a.equity0, 'usdm', 'Company', 'Latest 10-K'),
     I('dps_0', 'Dividend per share, last fiscal year', a.dps0, 'usd', 'Company', src.dps0),
+    I('tp_ratio', 'Total payout ratio (dividends + net buybacks)', a.totalPayout, 'pct', 'Company', src.totalPayout),
     I('tax', 'Tax rate', a.tax, 'pct', 'Cost of capital', src.tax),
     I('beta_l', 'Levered beta', a.beta, 'beta', 'Cost of capital', src.beta),
     I('mcap', 'Market capitalisation ($M)', '=price*shares', 'usdm', 'Cost of capital', 'Price × shares'),

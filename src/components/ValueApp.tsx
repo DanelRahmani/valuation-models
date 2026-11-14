@@ -267,8 +267,8 @@ function Valuation({ ticker, h, company, market }: Loaded) {
 
   const byId = (id: ModelId) => out.results.find((r) => r.id === id);
   const order: ModelId[] = a.aiMode
-    ? ['scenarios', 'fcff', 'fcfe', 'apv', 'ri', 'multiples', 'ddm_2stage', 'ddm_h', 'ddm_gordon']
-    : ['fcff', 'fcfe', 'apv', 'ri', 'multiples', 'ddm_gordon', 'ddm_2stage', 'ddm_h'];
+    ? ['scenarios', 'fcff', 'fcfe', 'apv', 'ri', 'multiples', 'total_payout', 'ddm_2stage', 'ddm_h', 'ddm_gordon']
+    : ['fcff', 'fcfe', 'apv', 'ri', 'multiples', 'total_payout', 'ddm_gordon', 'ddm_2stage', 'ddm_h'];
 
   return (
     <div>
@@ -321,7 +321,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
                 type="button"
                 onClick={() => setStory(true)}
                 disabled={!storyData}
-                title={storyData ? 'An animated walkthrough of the cash-flow valuation' : 'Needs a working cash-flow model (not available for banks and insurers)'}
+                title={storyData ? 'An animated walkthrough of the cash-flow valuation' : 'Needs a working FCFF model: not available for banks and insurers, or when FCFF is set aside for this company'}
                 className="rounded-full border border-accent/50 px-5 py-2.5 text-sm font-semibold text-accent transition-colors hover:border-accent hover:bg-accent/5 disabled:opacity-40"
               >
                 Walk me through it
@@ -410,7 +410,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
 
       <section className="mt-14">
         <h2 className="font-serif text-3xl">Where the methods land</h2>
-        <p className="mt-1 text-sm text-muted">Each bar moves the discount rate one point either way; the tick is the central value.</p>
+        <p className="mt-1 text-sm text-muted">Cash-flow bars move the discount rate one point either way; the multiples bar runs from the lowest to the highest multiple. The tick is the central value.</p>
         <div className="mt-6">
           <FootballField rows={field} price={price} />
         </div>
@@ -852,7 +852,7 @@ function buildField(out: ReturnType<typeof runAll>, a: Assumptions): FieldRow[] 
       rows.push({ label: 'Scenarios', low: Math.min(...cases), high: Math.max(...cases), point: sc.perShare! });
     }
   }
-  (['fcff', 'fcfe', 'apv', 'ri'] as ModelId[]).forEach(add);
+  (['fcff', 'fcfe', 'apv', 'ri', 'total_payout'] as ModelId[]).forEach(add);
   const m = ok('multiples');
   if (m) {
     const v = out.values.sheets.Multiples;

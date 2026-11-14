@@ -8,7 +8,7 @@ const MODELS: { name: string; rate: string; idea: string; fit: string }[] = [
   { name: 'FCFE DCF', rate: 'Cost of equity', idea: 'Cash flow left for shareholders after debt is served.', fit: 'Banks, stable leverage' },
   { name: 'APV', rate: 'Unlevered cost of equity', idea: 'The firm as if debt-free, plus the tax shield of its debt.', fit: 'LBOs, changing leverage' },
   { name: 'Residual income', rate: 'Cost of equity', idea: 'Book value plus profits above what shareholders require.', fit: 'Banks, insurers' },
-  { name: 'Dividend discount', rate: 'Cost of equity', idea: 'Gordon growth, two-stage and H-model.', fit: 'Mature dividend payers' },
+  { name: 'Dividends and buybacks', rate: 'Cost of equity', idea: 'Gordon growth, two-stage and H-model, plus total payout counting buybacks.', fit: 'Mature companies returning cash' },
   { name: 'Multiples', rate: 'Market prices', idea: 'P/E, EV/EBITDA, EV/Sales, P/B and PEG against industry averages.', fit: 'A reality check' },
   { name: 'Reverse DCF', rate: 'WACC', idea: 'The growth rate the current price already assumes.', fit: 'Anything priced on hope' },
   { name: 'Scenarios', rate: 'WACC', idea: 'Bear, base and bull with probabilities, compute capex and dilution.', fit: 'Pre-profit and AI companies' },
@@ -74,7 +74,7 @@ export default function Home() {
         {[
           ['Every number has a source', 'Each input shows where it came from: an XBRL tag in a 10-K, the monthly snapshot, a default, or you.'],
           ['Every formula is visible', 'Click any cell for the calculation in words and as an Excel formula. The export is the same model, live.'],
-          ['The models agree with each other', 'FCFF, FCFE, APV and residual income share assumptions and land within about one percent.'],
+          ['The models agree with each other', 'FCFF, FCFE, APV and residual income share assumptions and usually land within a few percent of each other.'],
         ].map(([t, d]) => (
           <div key={t} className="seam pt-4">
             <h3 className="font-serif text-xl">{t}</h3>

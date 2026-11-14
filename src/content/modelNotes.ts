@@ -50,6 +50,12 @@ export const MODEL_NOTES: Partial<Record<ModelId, ModelNote>> = {
     watchOut: 'An approximation: exact only when growth falls in a straight line.',
     ai: 'A fading-growth path fits an AI cost advantage that competitors slowly copy.',
   },
+  total_payout: {
+    short: 'Total payout',
+    bestFor: 'Mature companies that return cash through buybacks as well as dividends: most large US firms today.',
+    watchOut: 'Only counts cash actually handed back. A company piling up cash while it grows (paying out a third of earnings, say) looks cheaper here than in FCFF, which counts all free cash flow. Buybacks are lumpy, so the payout ratio is a three-year average.',
+    ai: 'Big tech returns hundreds of billions through buybacks while spending on AI. If capex keeps rising, the payout ratio has to fall, and this value with it.',
+  },
   multiples: {
     short: 'Multiples',
     bestFor: 'A reality check against how the market prices similar companies right now.',

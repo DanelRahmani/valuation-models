@@ -67,7 +67,7 @@ export function SimpleView({ name, h, a, out, field, onExpert }: { name: string;
         </div>
         <div>
           <FootballField rows={field} price={price} />
-          <p className="mt-3 text-xs text-muted">Each bar is one valuation method, moving the discount rate a point either way.</p>
+          <p className="mt-3 text-xs text-muted">Each bar is one valuation method. Cash-flow bars move the discount rate one point either way; the multiples bar runs from the lowest to the highest multiple. The tick is the central value.</p>
         </div>
       </div>
     </section>

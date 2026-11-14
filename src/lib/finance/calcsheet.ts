@@ -41,6 +41,7 @@ export type ModelId =
   | 'apv'
   | 'ddm_gordon'
   | 'ddm_2stage'
+  | 'total_payout'
   | 'ddm_h'
   | 'ri'
   | 'multiples'

@@ -6,7 +6,7 @@ import { RandomCompanyButton } from './RandomCompany';
 
 const ITEMS = [
   { href: '/', label: 'Home' },
-  { href: '/value/', label: 'Value a company' },
+  { href: '/value/', label: 'Value a company', short: 'Value' },
   { href: '/compare/', label: 'Compare' },
   { href: '/methodology/', label: 'Methodology' },
 ];
@@ -24,19 +24,26 @@ export function SiteNav() {
           {ITEMS.map((it) => {
             const active = norm(path) === it.href;
             return (
-              // On phones the logo already links home and "Value a company" is the search on the home page.
-              <li key={it.href} className={it.href === '/value/' || it.href === '/' ? 'hidden sm:block' : ''}>
+              // On phones the logo already links home, so Home is dropped and the rest use short labels.
+              <li key={it.href} className={it.href === '/' ? 'hidden sm:block' : ''}>
                 <Link
                   href={it.href}
-                  className={`relative block px-2.5 py-2 transition-colors sm:px-3 ${active ? 'font-semibold text-accent' : 'text-muted hover:text-accent'}`}
+                  className={`relative block px-2 py-2 transition-colors sm:px-3 ${active ? 'font-semibold text-accent' : 'text-muted hover:text-accent'}`}
                 >
-                  {it.label}
+                  {'short' in it && it.short ? (
+                    <>
+                      <span className="sm:hidden">{it.short}</span>
+                      <span className="hidden sm:inline">{it.label}</span>
+                    </>
+                  ) : (
+                    it.label
+                  )}
                   {active && <span aria-hidden className="seam absolute inset-x-2 -bottom-px" style={{ borderTopColor: 'currentColor' }} />}
                 </Link>
               </li>
             );
           })}
-          <li>
+          <li className="hidden sm:block">
             <a
               href="https://github.com/DanelRahmani/valuation-models"
               className="flex items-center px-2.5 py-2 text-muted transition-colors hover:text-accent sm:px-3"

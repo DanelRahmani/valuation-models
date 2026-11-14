@@ -15,7 +15,7 @@ const SECTIONS = [
   ['validation', 'Validation'],
   ['consistency', 'Consistency'],
   ['ai', 'Valuing AI companies'],
-  ['limits', 'Limits'],
+  ['limits', 'Limits and judgment calls'],
   ['sources', 'Sources'],
   ['references', 'Further reading'],
 ] as const;
@@ -227,7 +227,8 @@ export default function Methodology() {
           <p className="mt-4">
             Ten years. Revenue grows at the stage-1 rate for five years, then fades in a straight line to terminal growth. The operating margin moves from today
             to a target over a chosen number of years. Capex and D&amp;A are percentages of revenue (three-year averages by default), and working capital
-            absorbs a share of each new dollar of revenue. Defaults are a starting point, not a forecast.
+            absorbs a share of each new dollar of revenue. When a filing has no capex tag (common for utilities and REITs), capex is set equal to D&amp;A and
+            the page says so. Defaults are a starting point, not a forecast.
           </p>
           <ul className="mt-4 list-disc space-y-2 pl-5">
             <li>
@@ -260,6 +261,10 @@ export default function Methodology() {
               ['Gordon growth', 'V = D₁ / (re - g).'],
               ['Two-stage DDM', 'Five years of dividends at stage-1 growth, then Gordon.'],
               ['H-model', 'V = D₀(1 + gL)/(re - gL) + D₀ × H × (gS - gL)/(re - gL), for growth that fades in a straight line.'],
+              [
+                'Total payout',
+                'Dividends plus buybacks, net of stock-based pay, as a share of net income (three years pooled, at most 100% unless dividends alone are higher). Net income grows at stage-1 growth for five years and the payout is discounted at the cost of equity; after year 5 the payout rises to 1 - g / re, all a mature company needs to retain. Equity value divided by today’s shares.',
+              ],
               [
                 'Multiples',
                 'Company metric × peer multiple; enterprise multiples subtract net debt, with equity floored at zero. EV/Sales is scaled by the company’s margin over the peers’ margin and P/B by its return on equity over theirs (down without limit, up by at most 1.5×), since a revenue or book multiple is only fair at similar profitability. Loss-makers are not valued on revenue or book, P/B is left out where peers trade above 10× book, and a result resting on one multiple says so.',
@@ -330,7 +335,7 @@ export default function Methodology() {
 
           <H2 id="consistency">Consistency</H2>
           <p className="mt-4">
-            FCFF, FCFE, APV and residual income should give similar answers when they share assumptions, and here they land within about one percent of each
+            FCFF, FCFE, APV and residual income should give similar answers when they share assumptions, and they usually land within a few percent of each
             other. FCFE funds reinvestment at the current debt weight so leverage stays constant. Residual income uses clean-surplus accounting: book equity grows
             only by what is reinvested, which ties it to FCFE. Large gaps between methods usually point to an inconsistent input, which is itself worth knowing.
           </p>
@@ -349,14 +354,71 @@ export default function Methodology() {
             conversation.
           </p>
 
-          <H2 id="limits">Limits</H2>
+          <H2 id="limits">Limits and judgment calls</H2>
+          <p className="mt-4">
+            Every number on this site follows from the filings and a handful of defaults. The arithmetic is checked; the defaults are choices. These are the
+            choices that move answers most, why they were made, and where they fail. Each one is an input you can change on the company page.
+          </p>
+
+          <h3 className="mt-8 font-serif text-xl">Judgment calls</h3>
+          <dl className="mt-4 space-y-5">
+            {[
+              [
+                'Growth is capped at 20% a year',
+                'Stage-1 growth is the median of the last three years, held between -10% and 20%. Without a cap the site would extrapolate a boom: NVIDIA’s median is 114%, and five more years of that would put its revenue above $9 trillion. Across large companies, five-year revenue growth above 20% is rare (in Mauboussin, Callahan and Majd’s base rates only a small minority of large companies manage it), so 20% is already a generous default. The cost is that the fastest growers (Palantir, Tesla on its history, NVIDIA) come out far below their price. The page shows the uncapped figure in the growth input’s source note, and the reverse DCF says what growth the price assumes, which is the fairer way to judge them.',
+              ],
+              [
+                'Dividend models still run for low-yield growers',
+                'They run whenever dividends are at least 20% of earnings. For Eli Lilly or Costco that gives a value far below the price: the dividend is small next to what the company retains and reinvests, and a dividend model counts only what is paid. That is how the method works, not a bug, so the result is shown rather than hidden. The total payout model, which adds buybacks, and FCFF are the better guides for these firms. Below 20% the dividend models are switched off, because they would value a token payout rather than the business.',
+              ],
+              [
+                'Total payout counts only what is handed back',
+                'A company piling up cash while it grows (NVIDIA pays out about a third of its earnings) looks cheaper here than in FCFF, which counts all free cash flow whether it is paid out or not. Buybacks are lumpy, so the payout ratio is pooled over three years and stock-based pay is netted out: buybacks that only soak up new employee shares return nothing.',
+              ],
+              [
+                'Missing capex is set equal to depreciation',
+                'About 35 companies, mostly utilities and REITs, report capital spending under their own tags, which the SEC data used here does not carry. Their capex is assumed equal to D&A, the least a business must spend to keep its assets. Growing utilities spend more, so their cash-flow values are still on the high side; the page warns and the 10-K cash flow statement has the real figure.',
+              ],
+              [
+                'Values below zero are set aside',
+                'When a model values the equity below zero (Intel’s cash-flow models on current margins), the cash flows do not cover what is owed ahead of shareholders. A share cannot be worth less than nothing, so the model is marked as not applicable with the negative figure in its note, and the range on the page leaves it out.',
+              ],
+              [
+                'Payout ratios are pooled, not averaged',
+                'Three years of dividends over three years of earnings, the same way the tax rate is computed. An average of yearly ratios lets a single loss year drag the payout to zero and switch the dividend models off for a steady payer.',
+              ],
+            ].map(([k, v]) => (
+              <div key={k}>
+                <dt className="font-medium">{k}</dt>
+                <dd className="mt-1 text-muted">{v}</dd>
+              </div>
+            ))}
+          </dl>
+
+          <h3 className="mt-8 font-serif text-xl">Known limitations</h3>
           <ul className="mt-4 list-disc space-y-2 pl-5">
             <li>Annual data only; nothing changes between 10-K filings.</li>
             <li>Leases, pensions, minority interests and options are not adjusted for separately.</li>
-            <li>Banks and insurers fit FCFF poorly; use FCFE, residual income or the dividend models for them.</li>
+            <li>
+              Growth through share issuance is not netted out. A REIT that grows by issuing shares to buy property shows the growth but not the dilution, so
+              its values run high.
+            </li>
+            <li>
+              The cash-flow models disagree more for capital-heavy, highly levered firms (utilities, airlines, REITs): FCFE and residual income assume the
+              current debt weight holds, FCFF and APV do not. A wide spread there is information, not an error.
+            </li>
+            <li>
+              Stage-1 growth is a median of three yearly rates, which can understate a company with one strong and two flat years (Tesla: 19%, 1%, -3%
+              gives 1%).
+            </li>
+            <li>Banks and insurers are valued on equity only: residual income, dividends, P/E and P/B. There is no reverse DCF or walkthrough for them.</li>
             <li>Industry mapping from GICS to Damodaran categories is automatic and sometimes wrong. You can change it on each page.</li>
             <li>Price data is used to estimate betas but is not licensed for redistribution, so it is never published.</li>
           </ul>
+          <p className="mt-4">
+            This is a tool for understanding what a price assumes, not investment advice. A model value far from the price usually means the market expects
+            something the defaults do not; the reverse DCF and the sensitivity tabs show what.
+          </p>
 
           <H2 id="sources">Sources</H2>
           <ul className="mt-6 space-y-3">
@@ -383,6 +445,10 @@ export default function Methodology() {
             </li>
             <li>
               Marshall Blume (1971), &ldquo;On the Assessment of Risk&rdquo;, <em>Journal of Finance</em> 26(1). The beta adjustment.
+            </li>
+            <li>
+              Michael Mauboussin, Dan Callahan and Darius Majd (2016), <em>The Base Rate Book</em>, Credit Suisse. How often companies of a given size sustain a given rate of
+              sales growth; the case for capping stage-1 growth.
             </li>
             <li>
               Robert Hamada (1972), &ldquo;The Effect of the Firm&apos;s Capital Structure on the Systematic Risk of Common Stocks&rdquo;, <em>Journal of Finance</em>{' '}
