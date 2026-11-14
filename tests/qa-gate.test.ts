@@ -14,6 +14,7 @@ const qa = (rates: Partial<Record<'revenue' | 'netIncome' | 'equity', number>>, 
       referenceUnavailable: 0,
     },
     companies: {},
+    reference: {},
   };
 };
 

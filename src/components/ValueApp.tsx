@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { defaultAssumptions, defaultBetaMethod, MIN_BETA_R2, MIN_INDUSTRY_FIRMS, type Assumptions, type Sources } from '@/lib/finance/assumptions';
@@ -10,13 +10,21 @@ import { LINE_LABELS, type CompanyFile, type Historicals, type IndustryRow, type
 import { fmt } from '@/lib/format';
 import { MODEL_NOTES } from '@/content/modelNotes';
 import { ModelCard } from './ModelCard';
-import { FootballField, HistoryChart, SensitivityGrid, type FieldRow } from './Charts';
+import { FootballField, HistoryChart, SensitivityGrid, Tornado, type FieldRow } from './Charts';
+import { Uncertainty } from './Uncertainty';
+import { tornado, type TornadoInputs } from '@/lib/finance/uncertainty';
 import { RandomCompanyButton } from './RandomCompany';
 import { prettyName } from '@/lib/names';
 import { BetaResult, BetaUpload, type UploadedBeta } from './BetaPanel';
-import { Badge, Label, NumberField, ReadOnly, Seam } from './ui';
+import { Label, NumberField, ReadOnly } from './ui';
+import { StoryMode, buildStory } from './StoryMode';
+import { ValueCreation } from './ValueCreation';
+import { Peers, usePeers, type PeerMultiples } from './Peers';
+import { QaBadge } from './QaBadge';
+import { SimpleView } from './SimpleView';
+import { applyShare, decodeShare, encodeShare, type BetaChoice } from '@/lib/share';
 
-type BetaChoice = 'regression' | 'blume' | 'industry' | 'manual' | 'upload';
+type Tab = 'models' | 'value' | 'peers' | 'risk' | 'filings';
 
 interface Loaded {
   ticker: string;
@@ -114,13 +122,18 @@ function UploadCompany({ market, onLoaded }: { market: MarketFile | null; onLoad
 const betaFrom = (u: UploadedBeta): SnapshotBeta => ({ ...u.stats, source: 'upload', asOf: new Date().toISOString().slice(0, 10) });
 
 function Valuation({ ticker, h, company, market }: Loaded) {
+  const params = useSearchParams();
+  const shared = useMemo(() => decodeShare(params), []); // eslint-disable-line react-hooks/exhaustive-deps
   const industries = market?.industries ?? [];
   const [industry, setIndustry] = useState<string>(company?.industry ?? '');
   const ind: IndustryRow | undefined = industries.find((i) => i.name === industry);
   const [uploaded, setUploaded] = useState<UploadedBeta | null>(null);
-  const [betaChoice, setBetaChoice] = useState<BetaChoice>(() =>
-    defaultBetaMethod(company?.beta ?? null, ind?.unleveredBeta != null && company?.price != null ? ind.firms : 0),
-  );
+  const suggestedBeta = defaultBetaMethod(company?.beta ?? null, ind?.unleveredBeta != null && company?.price != null ? ind.firms : 0) as BetaChoice;
+  const [betaChoice, setBetaChoice] = useState<BetaChoice>(() => shared.beta ?? suggestedBeta);
+  const [simple, setSimple] = useState(!!shared.simple);
+  const [tab, setTab] = useState<Tab>('models');
+  const [story, setStory] = useState(false);
+  const [peerSource, setPeerSource] = useState<'damodaran' | 'sp500'>('damodaran');
 
   const initial = useMemo(() => {
     const { a, src } = defaultAssumptions(h, {
@@ -146,8 +159,12 @@ function Valuation({ ticker, h, company, market }: Loaded) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [h]);
 
-  const [a, setA] = useState<Assumptions>(initial.a);
-  const [src, setSrc] = useState<Sources>(initial.src);
+  const [a, setA] = useState<Assumptions>(() => applyShare(initial.a, shared));
+  const [src, setSrc] = useState<Sources>(() => {
+    const s2 = { ...initial.src };
+    for (const k of Object.keys(shared.over)) (s2 as Record<string, string>)[k] = 'From the shared link';
+    return s2;
+  });
   const set = <K extends keyof Assumptions>(k: K, v: Assumptions[K], s = 'You') => {
     setA((p) => ({ ...p, [k]: v }));
     setSrc((p) => ({ ...p, [k]: s }));
@@ -156,8 +173,11 @@ function Valuation({ ticker, h, company, market }: Loaded) {
   // Beta follows the chosen method.
   const mcap = a.price != null && a.shares ? a.price * a.shares : null;
   const relevered = ind?.unleveredBeta != null && mcap ? ind.unleveredBeta * (1 + (1 - a.tax) * (a.debt / mcap)) : null;
+  const firstBeta = useRef(true);
   useEffect(() => {
     const b = company?.beta;
+    if (firstBeta.current && betaChoice === 'manual') return void (firstBeta.current = false);
+    firstBeta.current = false;
     if (betaChoice === 'regression' && b) set('beta', b.beta, `Regression vs SPY, ${b.n} monthly returns (${b.source}, ${b.asOf})`);
     if (betaChoice === 'blume' && b) set('beta', b.blume, 'Blume-adjusted regression beta: 0.67β + 0.33');
     if (betaChoice === 'industry' && relevered != null) set('beta', relevered, `Damodaran ${industry} unlevered beta, relevered at this D/E`);
@@ -165,9 +185,20 @@ function Valuation({ ticker, h, company, market }: Loaded) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [betaChoice, relevered, uploaded]);
 
-  // Peer multiples follow the industry unless the user typed their own.
+  const peers = usePeers(ticker);
+  const applyPeerMedians = (m: PeerMultiples) => {
+    set('peers', { pe: m.pe, evEbitda: m.evEbitda, evSales: m.evSales, pb: m.pb, peg: a.peers.peg }, `Median of ${m.count} S&P 500 peers`);
+    setPeerSource('sp500');
+  };
+  const applyDamodaran = () => {
+    if (!ind) return;
+    set('peers', { pe: ind.pe, evEbitda: ind.evEbitda, evSales: ind.evSales, pb: ind.pb, peg: ind.peg }, `Damodaran industry average: ${ind.name}`);
+    setPeerSource('damodaran');
+  };
+
+  // Peer multiples follow the industry unless the user typed their own or chose S&P peers.
   useEffect(() => {
-    if (!ind || (src.peers && src.peers === 'You')) return;
+    if (!ind || (src.peers && src.peers === 'You') || peerSource === 'sp500') return;
     set('peers', { pe: ind.pe, evEbitda: ind.evEbitda, evSales: ind.evSales, pb: ind.pb, peg: ind.peg }, `Damodaran industry average: ${ind.name}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [industry]);
@@ -177,6 +208,46 @@ function Valuation({ ticker, h, company, market }: Loaded) {
   const price = I.price ?? null;
 
   const field = useMemo(() => buildField(out, a), [out, a]);
+  const storyData = useMemo(() => buildStory(prettyName(h.name), h, out), [h, out]);
+  // Sensitivity of the headline model (FCFF, or residual income for banks), shared by the tornado and Monte Carlo.
+  const tornadoInputs: TornadoInputs = useMemo(
+    () => ({
+      wacc: I.wacc ?? null,
+      re: I.re ?? null,
+      beta: a.beta,
+      betaSe: betaChoice === 'regression' || betaChoice === 'blume' ? (company?.beta?.se ?? null) : null,
+      g1: a.g1,
+      gT: a.gT,
+      marginTarget: a.marginTarget,
+      capexPct: a.capexPct,
+      nwcPct: a.nwcPct,
+      tax: a.tax,
+      roe: a.roe,
+    }),
+    [I.wacc, I.re, a, betaChoice, company],
+  );
+  const tornadoRows = useMemo(() => {
+    const ok = out.results.find((r) => r.id === (a.financial ? 'ri' : 'fcff'))?.status === 'ok';
+    return ok ? tornado(out.wb, tornadoInputs, a.financial) : [];
+  }, [out, tornadoInputs, a.financial]);
+
+  // Keep the address bar in step with the scenario, so it can be shared.
+  const query = ticker ? encodeShare({ ticker, beta: betaChoice, defaultBeta: suggestedBeta, simple, a, defaults: initial.a }) : '';
+  useEffect(() => {
+    if (!ticker) return;
+    const url = `${window.location.pathname}?${query}`;
+    if (url !== `${window.location.pathname}${window.location.search}`) window.history.replaceState(null, '', url);
+  }, [query, ticker]);
+  const [copied, setCopied] = useState(false);
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+    }
+  };
   const [busy, setBusy] = useState(false);
   const exportXlsx = async () => {
     setBusy(true);
@@ -202,12 +273,15 @@ function Valuation({ ticker, h, company, market }: Loaded) {
   return (
     <div>
       <section className="relative pt-12">
-        <div aria-hidden className="hero-vignette absolute -inset-x-24 -top-10 bottom-0" />
+        <div aria-hidden className="hero-vignette absolute inset-x-0 -top-10 bottom-0 lg:-inset-x-24" />
         <div className="relative grid gap-10 lg:grid-cols-[1fr_360px] lg:items-end">
           <div>
-            <Label>
-              {ticker ? `${ticker} · ` : ''}CIK {h.cik} · FY{h.years.at(-1)} 10-K{company ? ` · ${company.sector}` : ''}
-            </Label>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <Label>
+                {ticker ? `${ticker} · ` : ''}CIK {h.cik} · FY{h.years.at(-1)} 10-K{company ? ` · ${company.sector}` : ''}
+              </Label>
+              <QaBadge ticker={ticker} />
+            </div>
             <h1 className="mt-4 font-serif text-5xl italic leading-[1.02] sm:text-6xl">{prettyName(h.name)}</h1>
             <div aria-hidden className="mt-5 h-px w-40 bg-accent/70" />
             <dl className="mt-8 flex flex-wrap gap-3">
@@ -243,6 +317,15 @@ function Valuation({ ticker, h, company, market }: Loaded) {
               >
                 {busy ? 'Building workbook…' : 'Download Excel model'}
               </button>
+              <button
+                type="button"
+                onClick={() => setStory(true)}
+                disabled={!storyData}
+                title={storyData ? 'An animated walkthrough of the cash-flow valuation' : 'Needs a working cash-flow model (not available for banks and insurers)'}
+                className="rounded-full border border-accent/50 px-5 py-2.5 text-sm font-semibold text-accent transition-colors hover:border-accent hover:bg-accent/5 disabled:opacity-40"
+              >
+                Walk me through it
+              </button>
               <RandomCompanyButton current={ticker} />
             </div>
           </div>
@@ -269,6 +352,43 @@ function Valuation({ ticker, h, company, market }: Loaded) {
         </div>
       </section>
 
+      <div className="mt-10 flex flex-wrap items-center justify-between gap-3 border-y border-seam py-3">
+        <div role="radiogroup" aria-label="View" className="inline-flex rounded-full border border-seam p-0.5 text-sm">
+          {(
+            [
+              [true, 'Simple'],
+              [false, 'Expert'],
+            ] as const
+          ).map(([v, label]) => (
+            <button
+              key={label}
+              type="button"
+              role="radio"
+              aria-checked={simple === v}
+              onClick={() => setSimple(v)}
+              className={`rounded-full px-4 py-1 transition-colors ${simple === v ? 'bg-accent text-bg' : 'text-muted hover:text-ink'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+          {ticker && (
+            <Link className="link" href={`/compare/?t=${ticker}`}>
+              Compare with…
+            </Link>
+          )}
+          {ticker && (
+            <button type="button" onClick={copyLink} className="link" aria-live="polite">
+              {copied ? 'Link copied' : 'Copy link to this scenario'}
+            </button>
+          )}
+        </div>
+      </div>
+      {simple ? (
+        <SimpleView name={prettyName(h.name)} h={h} a={a} out={out} field={field} onExpert={() => setSimple(false)} />
+      ) : (
+        <>
       <section className="mt-12 rounded-[1.5rem] border border-seam bg-panel/70 px-6 py-6">
         <Label>Reverse DCF</Label>
         <p className="mt-3 font-serif text-2xl leading-snug sm:text-3xl">
@@ -296,7 +416,37 @@ function Valuation({ ticker, h, company, market }: Loaded) {
         </div>
       </section>
 
-      <div className="mt-12 grid gap-12 lg:grid-cols-[340px_1fr]">
+      <div role="tablist" aria-label="Sections" className="mt-14 flex gap-1 overflow-x-auto border-b border-seam">
+        {(
+          [
+            ['models', 'Models'],
+            ['value', 'Value creation'],
+            ['peers', 'Peers'],
+            ['risk', 'Uncertainty'],
+            ['filings', 'Filings'],
+          ] as [Tab, string][]
+        )
+          .filter(([k]) => k !== 'peers' || !!ticker)
+          .map(([k, label]) => (
+            <button
+              key={k}
+              type="button"
+              role="tab"
+              id={`tab-${k}`}
+              aria-selected={tab === k}
+              aria-controls={`panel-${k}`}
+              onClick={() => setTab(k)}
+              className={`-mb-px whitespace-nowrap border-b-2 px-4 py-2.5 text-sm transition-colors ${
+                tab === k ? 'border-accent text-ink' : 'border-transparent text-muted hover:text-ink'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+      </div>
+      <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="pt-10">
+        {tab === 'models' && (
+      <div className="grid gap-12 lg:grid-cols-[340px_1fr]">
         <aside className="lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:pr-2">
           <h2 className="font-serif text-2xl">Assumptions</h2>
           <p className="mt-1 text-xs text-muted">Every field shows where its value came from. Change anything; the models update as you type.</p>
@@ -459,7 +609,24 @@ function Valuation({ ticker, h, company, market }: Loaded) {
           )}
 
           <Group title="Peer multiples">
-            <p className="text-xs text-muted">{src.peers ?? 'Enter peer multiples, or pick an industry above.'}</p>
+            {ticker && (
+              <div role="radiogroup" aria-label="Peer multiples source" className="mt-1 inline-flex rounded-full border border-seam p-0.5 text-xs">
+                <button type="button" role="radio" aria-checked={peerSource === 'damodaran'} onClick={applyDamodaran} disabled={!ind} className={`rounded-full px-3 py-0.5 ${peerSource === 'damodaran' ? 'bg-accent text-bg' : 'text-muted'}`}>
+                  Damodaran industry
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={peerSource === 'sp500'}
+                  onClick={() => peers && applyPeerMedians(peers.multiples)}
+                  disabled={!peers}
+                  className={`rounded-full px-3 py-0.5 ${peerSource === 'sp500' ? 'bg-accent text-bg' : 'text-muted'}`}
+                >
+                  S&amp;P 500 peers
+                </button>
+              </div>
+            )}
+            <p className="mt-1 text-xs text-muted">{src.peers ?? 'Enter peer multiples, or pick an industry above.'}</p>
             {(
               [
                 ['pe', 'P/E'],
@@ -487,20 +654,51 @@ function Valuation({ ticker, h, company, market }: Loaded) {
                 wb={out.wb}
                 values={out.values}
                 extra={
-                  id === 'fcff' && out.sensitivity ? (
-                    <details className="mt-5">
-                      <summary className="cursor-pointer text-sm text-accent">Sensitivity: WACC × terminal growth</summary>
-                      <SensitivityGrid s={out.sensitivity} base={r.perShare} />
-                    </details>
-                  ) : null
+                  <>
+                    {id === 'fcff' && out.sensitivity && (
+                      <details className="mt-5">
+                        <summary className="cursor-pointer text-sm text-accent">Sensitivity: WACC × terminal growth</summary>
+                        <SensitivityGrid s={out.sensitivity} base={r.perShare} />
+                      </details>
+                    )}
+                    {id === (a.financial ? 'ri' : 'fcff') && tornadoRows.length > 0 && r.perShare != null && (
+                      <details className="mt-3">
+                        <summary className="cursor-pointer text-sm text-accent">Which assumption matters most</summary>
+                        <p className="mt-3 text-xs text-muted">
+                          Each bar moves one input between a low and a high value with everything else held; the pale end is the low input. The solid line
+                          is this model&apos;s value.
+                        </p>
+                        <div className="mt-3">
+                          <Tornado rows={tornadoRows} base={r.perShare} price={price} />
+                        </div>
+                      </details>
+                    )}
+                  </>
                 }
               />
             );
           })}
-          <Seam />
-          <HistoricalsTable h={h} />
         </div>
       </div>
+        )}
+        {tab === 'value' && <ValueCreation h={h} tax={a.tax} wacc={I.wacc ?? null} re={I.re ?? null} financial={a.financial} name={prettyName(h.name)} />}
+        {tab === 'peers' && ticker && <Peers ticker={ticker} onUseMultiples={applyPeerMedians} usingPeers={peerSource === 'sp500'} />}
+        {tab === 'risk' && (
+          <Uncertainty
+            wb={out.wb}
+            h={h}
+            inputs={tornadoInputs}
+            financial={a.financial}
+            price={price}
+            base={byId(a.financial ? 'ri' : 'fcff')?.perShare ?? null}
+            topDriver={tornadoRows[0] ?? null}
+          />
+        )}
+        {tab === 'filings' && <HistoricalsTable h={h} />}
+      </div>
+        </>
+      )}
+      {storyData && <StoryMode story={storyData} open={story} onClose={() => setStory(false)} />}
     </div>
   );
 }
@@ -557,9 +755,9 @@ function HeadlineBetas(p: {
                 on ? 'border-[rgb(var(--accent))] bg-[rgb(var(--accent)/0.07)]' : 'border-seam hover:border-muted'
               }`}
             >
-              <span className="block text-[0.6875rem] leading-tight">
+              <span className="flex flex-wrap items-baseline gap-x-1 text-[0.6875rem] leading-tight">
                 {o.label}
-                {o.k === p.suggested && <span className="ml-1 font-mono text-[0.5625rem] uppercase tracking-wide text-[rgb(var(--accent))]">suggested</span>}
+                {o.k === p.suggested && <span className="font-mono text-[0.5625rem] uppercase tracking-wide text-[rgb(var(--accent))]">suggested</span>}
               </span>
               <span className="num block text-lg leading-tight">{o.beta != null ? o.beta.toFixed(2) : '–'}</span>
               <span className="block font-mono text-[0.625rem] leading-tight text-muted">{o.sub}</span>

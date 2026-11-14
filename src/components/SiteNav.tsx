@@ -7,6 +7,7 @@ import { RandomCompanyButton } from './RandomCompany';
 const ITEMS = [
   { href: '/', label: 'Home' },
   { href: '/value/', label: 'Value a company' },
+  { href: '/compare/', label: 'Compare' },
   { href: '/methodology/', label: 'Methodology' },
 ];
 
@@ -23,10 +24,11 @@ export function SiteNav() {
           {ITEMS.map((it) => {
             const active = norm(path) === it.href;
             return (
-              <li key={it.href} className={it.href === '/value/' ? 'hidden sm:block' : ''}>
+              // On phones the logo already links home and "Value a company" is the search on the home page.
+              <li key={it.href} className={it.href === '/value/' || it.href === '/' ? 'hidden sm:block' : ''}>
                 <Link
                   href={it.href}
-                  className={`relative block px-3 py-2 transition-colors ${active ? 'font-semibold text-accent' : 'text-muted hover:text-accent'}`}
+                  className={`relative block px-2.5 py-2 transition-colors sm:px-3 ${active ? 'font-semibold text-accent' : 'text-muted hover:text-accent'}`}
                 >
                   {it.label}
                   {active && <span aria-hidden className="seam absolute inset-x-2 -bottom-px" style={{ borderTopColor: 'currentColor' }} />}
@@ -37,7 +39,7 @@ export function SiteNav() {
           <li>
             <a
               href="https://github.com/DanelRahmani/valuation-models"
-              className="flex items-center px-3 py-2 text-muted transition-colors hover:text-accent"
+              className="flex items-center px-2.5 py-2 text-muted transition-colors hover:text-accent sm:px-3"
               aria-label="Source code on GitHub"
             >
               <GitHubIcon />

@@ -18,7 +18,8 @@ export type LineItem =
   | 'sharesOutstanding'
   | 'dilutedShares'
   | 'sbc'
-  | 'impairments';
+  | 'impairments'
+  | 'acquisitions';
 
 export interface FactValue {
   value: number;
@@ -133,4 +134,5 @@ export const LINE_LABELS: Record<LineItem, string> = {
   dilutedShares: 'Diluted shares (weighted)',
   sbc: 'Stock-based compensation',
   impairments: 'Impairments',
+  acquisitions: 'Acquisitions',
 };

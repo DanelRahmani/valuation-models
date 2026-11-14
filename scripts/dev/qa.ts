@@ -1,8 +1,9 @@
 /**
- * Run the snapshot's quality gate on the current public data: npx tsx scripts/dev/qa.ts [--ref-dir DIR]
+ * Run the snapshot's quality gate on the current public data and write public/data/qa.json:
+ *   npx tsx scripts/dev/qa.ts [--ref-dir DIR]
  * --ref-dir: saved Nasdaq financials responses ({ fin: data }) named TICKER.json; otherwise fetched live.
  */
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gateFailures, loadExceptions, runQa } from '../snapshot/qa';
 import * as S from '../snapshot/sources';
@@ -25,5 +26,6 @@ console.log(JSON.stringify(qa.summary, null, 1));
 const byId: Record<string, number> = {};
 for (const issues of Object.values(qa.companies)) for (const i of issues) byId[`${i.severity} ${i.id}`] = (byId[`${i.severity} ${i.id}`] ?? 0) + 1;
 console.log(byId);
+writeFileSync(join(dir, 'qa.json'), JSON.stringify(qa));
 const fails = gateFailures(qa);
 console.log(fails.length ? `GATE WOULD BLOCK:\n- ${fails.join('\n- ')}` : 'Gate passes: the snapshot would be published.');
