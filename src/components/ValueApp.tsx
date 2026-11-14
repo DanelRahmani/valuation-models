@@ -10,7 +10,9 @@ import { LINE_LABELS, type CompanyFile, type Historicals, type IndustryRow, type
 import { fmt } from '@/lib/format';
 import { MODEL_NOTES } from '@/content/modelNotes';
 import { ModelCard } from './ModelCard';
-import { FootballField, HistoryChart, SensitivityGrid, type FieldRow } from './Charts';
+import { FootballField, HistoryChart, SensitivityGrid, Tornado, type FieldRow } from './Charts';
+import { Uncertainty } from './Uncertainty';
+import { tornado, type TornadoInputs } from '@/lib/finance/uncertainty';
 import { RandomCompanyButton } from './RandomCompany';
 import { prettyName } from '@/lib/names';
 import { BetaResult, BetaUpload, type UploadedBeta } from './BetaPanel';
@@ -22,7 +24,7 @@ import { QaBadge } from './QaBadge';
 import { SimpleView } from './SimpleView';
 import { applyShare, decodeShare, encodeShare, type BetaChoice } from '@/lib/share';
 
-type Tab = 'models' | 'value' | 'peers' | 'filings';
+type Tab = 'models' | 'value' | 'peers' | 'risk' | 'filings';
 
 interface Loaded {
   ticker: string;
@@ -207,6 +209,27 @@ function Valuation({ ticker, h, company, market }: Loaded) {
 
   const field = useMemo(() => buildField(out, a), [out, a]);
   const storyData = useMemo(() => buildStory(prettyName(h.name), h, out), [h, out]);
+  // Sensitivity of the headline model (FCFF, or residual income for banks), shared by the tornado and Monte Carlo.
+  const tornadoInputs: TornadoInputs = useMemo(
+    () => ({
+      wacc: I.wacc ?? null,
+      re: I.re ?? null,
+      beta: a.beta,
+      betaSe: betaChoice === 'regression' || betaChoice === 'blume' ? (company?.beta?.se ?? null) : null,
+      g1: a.g1,
+      gT: a.gT,
+      marginTarget: a.marginTarget,
+      capexPct: a.capexPct,
+      nwcPct: a.nwcPct,
+      tax: a.tax,
+      roe: a.roe,
+    }),
+    [I.wacc, I.re, a, betaChoice, company],
+  );
+  const tornadoRows = useMemo(() => {
+    const ok = out.results.find((r) => r.id === (a.financial ? 'ri' : 'fcff'))?.status === 'ok';
+    return ok ? tornado(out.wb, tornadoInputs, a.financial) : [];
+  }, [out, tornadoInputs, a.financial]);
 
   // Keep the address bar in step with the scenario, so it can be shared.
   const query = ticker ? encodeShare({ ticker, beta: betaChoice, defaultBeta: suggestedBeta, simple, a, defaults: initial.a }) : '';
@@ -399,6 +422,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
             ['models', 'Models'],
             ['value', 'Value creation'],
             ['peers', 'Peers'],
+            ['risk', 'Uncertainty'],
             ['filings', 'Filings'],
           ] as [Tab, string][]
         )
@@ -630,12 +654,26 @@ function Valuation({ ticker, h, company, market }: Loaded) {
                 wb={out.wb}
                 values={out.values}
                 extra={
-                  id === 'fcff' && out.sensitivity ? (
-                    <details className="mt-5">
-                      <summary className="cursor-pointer text-sm text-accent">Sensitivity: WACC × terminal growth</summary>
-                      <SensitivityGrid s={out.sensitivity} base={r.perShare} />
-                    </details>
-                  ) : null
+                  <>
+                    {id === 'fcff' && out.sensitivity && (
+                      <details className="mt-5">
+                        <summary className="cursor-pointer text-sm text-accent">Sensitivity: WACC × terminal growth</summary>
+                        <SensitivityGrid s={out.sensitivity} base={r.perShare} />
+                      </details>
+                    )}
+                    {id === (a.financial ? 'ri' : 'fcff') && tornadoRows.length > 0 && r.perShare != null && (
+                      <details className="mt-3">
+                        <summary className="cursor-pointer text-sm text-accent">Which assumption matters most</summary>
+                        <p className="mt-3 text-xs text-muted">
+                          Each bar moves one input between a low and a high value with everything else held; the pale end is the low input. The solid line
+                          is this model&apos;s value.
+                        </p>
+                        <div className="mt-3">
+                          <Tornado rows={tornadoRows} base={r.perShare} price={price} />
+                        </div>
+                      </details>
+                    )}
+                  </>
                 }
               />
             );
@@ -645,6 +683,17 @@ function Valuation({ ticker, h, company, market }: Loaded) {
         )}
         {tab === 'value' && <ValueCreation h={h} tax={a.tax} wacc={I.wacc ?? null} re={I.re ?? null} financial={a.financial} name={prettyName(h.name)} />}
         {tab === 'peers' && ticker && <Peers ticker={ticker} onUseMultiples={applyPeerMedians} usingPeers={peerSource === 'sp500'} />}
+        {tab === 'risk' && (
+          <Uncertainty
+            wb={out.wb}
+            h={h}
+            inputs={tornadoInputs}
+            financial={a.financial}
+            price={price}
+            base={byId(a.financial ? 'ri' : 'fcff')?.perShare ?? null}
+            topDriver={tornadoRows[0] ?? null}
+          />
+        )}
         {tab === 'filings' && <HistoricalsTable h={h} />}
       </div>
         </>

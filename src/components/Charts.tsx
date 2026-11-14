@@ -60,6 +60,80 @@ export function FootballField({ rows, price }: { rows: FieldRow[]; price: number
   );
 }
 
+/**
+ * Tornado: one bar per assumption, from its value at the low input to its value at the high input, widest first.
+ * The pale end is the low input, the dark end the high input.
+ */
+export function Tornado({
+  rows,
+  base,
+  price,
+}: {
+  rows: { label: string; atLow: number | null; atHigh: number | null; low: number; high: number; fmt: 'pct' | 'beta' }[];
+  base: number;
+  price: number | null;
+}) {
+  const ok = rows.filter((r) => r.atLow != null && r.atHigh != null);
+  if (!ok.length) return null;
+  // Scale to the bars; the price joins the scale only when it is close, otherwise an edge marker points to it.
+  const bars = ok.flatMap((r) => [r.atLow!, r.atHigh!]).concat([base]);
+  const bLo = Math.min(...bars);
+  const bHi = Math.max(...bars);
+  const near = price != null && price >= bLo - (bHi - bLo) * 0.3 && price <= bHi + (bHi - bLo) * 0.3;
+  const vals = near ? [...bars, price!] : bars;
+  const lo = Math.min(...vals);
+  const hi = Math.max(...vals);
+  const pad = (hi - lo) * 0.06 || 1;
+  const W = 640;
+  const L = 200;
+  const rowH = 30;
+  const H = ok.length * rowH + 34;
+  const x = (v: number) => L + ((v - (lo - pad)) / (hi - lo + 2 * pad)) * (W - L - 16);
+  const inp = (v: number, f: 'pct' | 'beta') => (f === 'pct' ? `${(v * 100).toFixed(1)}%` : v.toFixed(2));
+  const ticks = niceTicks(lo - pad, hi + pad, 5);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Value per share as each assumption moves between a low and a high value">
+      {ticks.map((t) => (
+        <g key={t}>
+          <line x1={x(t)} x2={x(t)} y1={4} y2={H - 26} stroke="var(--seam)" />
+          <text x={x(t)} y={H - 10} textAnchor="middle" className="fill-muted font-mono text-[10px]">
+            ${t.toLocaleString('en-US')}
+          </text>
+        </g>
+      ))}
+      {ok.map((r, i) => {
+        const y = 8 + i * rowH;
+        const a = x(r.atLow!);
+        const b = x(r.atHigh!);
+        return (
+          <g key={r.label}>
+            <text x={L - 10} y={y + 14} textAnchor="end" className="fill-ink text-[12px]">
+              {r.label}
+            </text>
+            <rect x={Math.min(a, x(base))} y={y + 4} width={Math.max(1, Math.abs(a - x(base)))} height={14} className="fill-accent/30" />
+            <rect x={Math.min(b, x(base))} y={y + 4} width={Math.max(1, Math.abs(b - x(base)))} height={14} className="fill-accent" />
+            <title>{`${r.label}: ${inp(r.low, r.fmt)} gives ${fmt(r.atLow, 'usd')}, ${inp(r.high, r.fmt)} gives ${fmt(r.atHigh, 'usd')}`}</title>
+          </g>
+        );
+      })}
+      <line x1={x(base)} x2={x(base)} y1={0} y2={H - 26} className="stroke-ink" strokeWidth={1.5} />
+      {price != null && near && (
+        <g>
+          <line x1={x(price)} x2={x(price)} y1={0} y2={H - 26} className="stroke-ink" strokeDasharray="3 3" />
+          <text x={x(price) + 4} y={10} className="fill-ink font-mono text-[10px]">
+            price {fmt(price, 'usd')}
+          </text>
+        </g>
+      )}
+      {price != null && !near && (
+        <text x={price > bHi ? W - 8 : L} y={10} textAnchor={price > bHi ? 'end' : 'start'} className="fill-ink font-mono text-[10px]">
+          {price > bHi ? `price ${fmt(price, 'usd')} →` : `← price ${fmt(price, 'usd')}`}
+        </text>
+      )}
+    </svg>
+  );
+}
+
 function niceTicks(lo: number, hi: number, n: number) {
   const span = hi - lo;
   const step0 = span / n;

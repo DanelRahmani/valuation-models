@@ -11,6 +11,7 @@ const SECTIONS = [
   ['models', 'The models'],
   ['financials', 'Banks and insurers'],
   ['peers', 'Peers and value creation'],
+  ['uncertainty', 'Sensitivity and uncertainty'],
   ['validation', 'Validation'],
   ['consistency', 'Consistency'],
   ['ai', 'Valuing AI companies'],
@@ -294,6 +295,16 @@ export default function Methodology() {
             A company creates value only when its return on invested capital beats its WACC. The value-creation tab shows that spread over ten years, where
             the cash went (capex, acquisitions, dividends, buybacks), stock pay as a share of revenue, net debt to EBITDA and interest coverage. Banks and
             insurers are shown on return on equity against the cost of equity.
+          </p>
+
+          <H2 id="uncertainty">Sensitivity and uncertainty</H2>
+          <p className="mt-4">
+            The tornado chart moves one input at a time between a low and a high value (WACC ±1 point, growth and margin ±3 points, capex ±25%, terminal
+            growth ±0.5 point, beta across its regression&apos;s 95% range) and ranks them by how far the value moves. The Monte Carlo tab re-runs the same model
+            2,000 times in the browser, drawing growth, margin (or return on equity), beta, terminal growth and capex together. Spreads come from the
+            company&apos;s own history: the spread of five-year average growth is the yearly spread divided by √5, and the beta spread is the regression&apos;s
+            standard error. Growth and margin are drawn with a 0.3 correlation. Draws where the discount rate falls to within half a point of terminal
+            growth are counted and set aside rather than kept as absurd values. The random generator is seeded, so a given run is reproducible.
           </p>
 
           <H2 id="validation">Checked against an independent source</H2>
