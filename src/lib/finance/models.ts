@@ -227,6 +227,61 @@ export function ddmSheets(): SheetDef[] {
 }
 
 /** Multiples. Rows whose base metric is negative or whose peer multiple is missing are left blank. */
+/**
+ * EV/Sales scaled to the company's margin. A revenue multiple is only fair at a similar profitability: a company with
+ * half its peers' operating margin deserves about half their EV/Sales (the ratio may cut the multiple to zero but raise it by at most 1.5x, because the
+ * industry average already reflects its most profitable members). A company
+ * with an operating loss cannot be valued on revenue at all, so the row is skipped.
+ */
+function evSalesRow(a: Assumptions): RowDef {
+  const margin = a.marginTarget ?? a.margin0;
+  const peerMargin = a.peers.margin ?? null;
+  const usable = !a.financial && a.rev0 != null && a.rev0 > 0 && a.peers.evSales != null && margin != null && margin > 0;
+  const scaled = peerMargin != null && peerMargin > 0;
+  return {
+    key: 'ev_sales',
+    label: scaled ? 'EV/Sales, margin-adjusted: (revenue × peer multiple × margin ÷ peer margin - net debt) / shares' : 'EV/Sales: (revenue × multiple - net debt) / shares',
+    fmt: 'usd',
+    cells: ['=rev_0', scaled ? '=ev_sales_peer*MIN(1.5,MAX(0,margin_target/margin_peer))' : '=ev_sales_peer', usable ? '=MAX(0,(@ev_sales[0]*@ev_sales[1]-net_debt)/shares)' : null],
+    note:
+      !a.financial && margin != null && margin <= 0
+        ? 'Skipped: a revenue multiple cannot value a company with an operating loss.'
+        : scaled
+          ? 'The peer multiple is scaled by this company’s target operating margin over the peers’ margin.'
+          : undefined,
+  };
+}
+
+/**
+ * P/B scaled to the company's return on equity, for the same reason: book value is worth a multiple only in proportion
+ * to what it earns (justified P/B rises with ROE). A company losing money on its equity is not valued on book here.
+ */
+const PB_MAX_NONFINANCIAL = 10;
+
+function pbRow(a: Assumptions): RowDef {
+  const roe = a.ni0 != null && a.equity0 != null && a.equity0 > 0 ? a.ni0 / a.equity0 : null;
+  const peerRoe = a.peers.roe ?? null;
+  const scaled = peerRoe != null && peerRoe > 0;
+  // Outside banks and insurers, an industry trading above 10x book has book values too small to anchor anything
+  // (restaurants, where years of buybacks leave little or negative equity), so P/B is left out there.
+  const bookAnchors = a.financial || (a.peers.pb != null && a.peers.pb <= PB_MAX_NONFINANCIAL);
+  const usable = bookAnchors && a.equity0 != null && a.equity0 > 0 && a.peers.pb != null && (!scaled || (roe != null && roe > 0));
+  return {
+    key: 'pb',
+    label: scaled ? 'P/B, return-adjusted: book value per share × peer P/B × ROE ÷ peer ROE' : 'P/B: book value per share × peer P/B',
+    fmt: 'usd',
+    cells: ['=equity_0/shares', scaled ? '=pb_peer*MIN(1.5,MAX(0,(ni_0/equity_0)/roe_peer))' : '=pb_peer', usable ? '=@pb[0]*@pb[1]' : null],
+    note:
+      !bookAnchors
+        ? `Skipped: peers trade at ${a.peers.pb?.toFixed(0)}x book, so book value is too small to anchor a valuation in this industry.`
+        : scaled && roe != null && roe <= 0
+        ? 'Skipped: book value earning a negative return cannot be valued on a peer multiple.'
+        : scaled
+          ? 'The peer multiple is scaled by this company’s return on equity over the peers’.'
+          : undefined,
+  };
+}
+
 export function multiplesSheet(a: Assumptions, ebitda0: number | null): SheetDef {
   const eps = a.ni0 != null && a.shares ? a.ni0 / a.shares : null;
   const ok = (metric: number | null, peer: number | null) => metric != null && metric > 0 && peer != null;
@@ -242,20 +297,10 @@ export function multiplesSheet(a: Assumptions, ebitda0: number | null): SheetDef
       label: 'EV/EBITDA: (EBITDA × multiple - net debt) / shares',
       fmt: 'usd',
       // Not for banks and insurers: their debt is operating funding, so enterprise value means nothing.
-      cells: ['=ebit_0+da_0', '=ev_ebitda_peer', !a.financial && ok(ebitda0, a.peers.evEbitda) ? '=(@ev_ebitda[0]*@ev_ebitda[1]-net_debt)/shares' : null],
+      cells: ['=ebit_0+da_0', '=ev_ebitda_peer', !a.financial && ok(ebitda0, a.peers.evEbitda) ? '=MAX(0,(@ev_ebitda[0]*@ev_ebitda[1]-net_debt)/shares)' : null],
     },
-    {
-      key: 'ev_sales',
-      label: 'EV/Sales: (revenue × multiple - net debt) / shares',
-      fmt: 'usd',
-      cells: ['=rev_0', '=ev_sales_peer', !a.financial && ok(a.rev0, a.peers.evSales) ? '=(@ev_sales[0]*@ev_sales[1]-net_debt)/shares' : null],
-    },
-    {
-      key: 'pb',
-      label: 'P/B: book value per share × peer P/B',
-      fmt: 'usd',
-      cells: ['=equity_0/shares', '=pb_peer', ok(a.equity0, a.peers.pb) ? '=@pb[0]*@pb[1]' : null],
-    },
+    evSalesRow(a),
+    pbRow(a),
     {
       key: 'peg',
       label: 'PEG: EPS × growth (in %) × peer PEG',
@@ -263,8 +308,19 @@ export function multiplesSheet(a: Assumptions, ebitda0: number | null): SheetDef
       cells: ['=ni_0/shares', '=peg_peer', ok(eps, a.peers.peg) && a.g1 > 0 ? '=@peg[0]*g_stage1*100*@peg[1]' : null],
     },
   ];
-  const implied = rows.filter((r) => r.cells[2] != null).map((r) => `@${r.key}[2]`);
-  rows.push({ key: 'per_share', label: 'Average of available multiples', fmt: 'usd', emphasis: true, cells: [null, null, implied.length ? `=AVERAGE(${implied.join(',')})` : null] });
+  const used = rows.filter((r) => r.cells[2] != null);
+  const implied = used.map((r) => `@${r.key}[2]`);
+  rows.push({
+    key: 'per_share',
+    label: used.length === 1 ? `Based on one multiple only (${used[0].label.split(':')[0]})` : 'Average of available multiples',
+    fmt: 'usd',
+    emphasis: true,
+    cells: [null, null, implied.length ? `=AVERAGE(${implied.join(',')})` : null],
+    note:
+      used.length === 1
+        ? 'Only one multiple applies (the others need positive earnings), so treat this as a rough guide rather than a valuation.'
+        : undefined,
+  });
   return {
     id: 'multiples',
     name: 'Multiples',
@@ -273,7 +329,11 @@ export function multiplesSheet(a: Assumptions, ebitda0: number | null): SheetDef
     rows,
     result: { row: 'per_share', col: 2 },
     status: implied.length ? 'ok' : 'needs-input',
-    message: implied.length ? undefined : 'Enter at least one peer multiple.',
+    message: !implied.length
+      ? 'Enter at least one peer multiple.'
+      : used.length === 1
+        ? `Based on one multiple only (${used[0].label.split(':')[0]}): the others need positive earnings. Treat it as a rough guide.`
+        : undefined,
   };
 }
 

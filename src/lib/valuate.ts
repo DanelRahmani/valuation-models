@@ -47,7 +47,7 @@ export function companyDefaults(company: CompanyFile, market: MarketFile | null,
     src.erp = market.erpSource;
   }
   if (ind) {
-    a.peers = { pe: ind.pe, evEbitda: ind.evEbitda, evSales: ind.evSales, pb: ind.pb, peg: ind.peg };
+    a.peers = { pe: ind.pe, evEbitda: ind.evEbitda, evSales: ind.evSales, pb: ind.pb, peg: ind.peg, margin: ind.operatingMargin ?? null, roe: ind.roe ?? null };
     src.peers = `Damodaran industry average: ${ind.name}`;
   }
   const mcap = a.price != null && a.shares ? a.price * a.shares : null;

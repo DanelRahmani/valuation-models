@@ -31,7 +31,8 @@ export interface Assumptions {
   dps0: number | null;
   payout: number;
   hHalfLife: number;
-  peers: { pe: number | null; evEbitda: number | null; evSales: number | null; pb: number | null; peg: number | null };
+  /** Peer multiples, plus the peers' operating margin that their EV/Sales goes with. */
+  peers: { pe: number | null; evEbitda: number | null; evSales: number | null; pb: number | null; peg: number | null; margin?: number | null; roe?: number | null };
   aiMode: boolean;
   /** Banks, insurers, brokers and asset managers: valued on equity (residual income, dividends, P/E, P/B), not enterprise value. */
   financial: boolean;
@@ -339,7 +340,9 @@ export function inputDefs(a: Assumptions, src: Sources, h: Historicals): InputDe
     I('pe_peer', 'Peer P/E', a.peers.pe, 'x', 'Peers', src.peers ?? 'You'),
     I('ev_ebitda_peer', 'Peer EV/EBITDA', a.peers.evEbitda, 'x', 'Peers', src.peers ?? 'You'),
     I('ev_sales_peer', 'Peer EV/Sales', a.peers.evSales, 'x', 'Peers', src.peers ?? 'You'),
+    I('margin_peer', 'Peer operating margin', a.peers.margin ?? null, 'pct', 'Peers', src.peers ?? 'You', 'Scales the peer EV/Sales to this company’s margin'),
     I('pb_peer', 'Peer P/B', a.peers.pb, 'x', 'Peers', src.peers ?? 'You'),
+    I('roe_peer', 'Peer return on equity', a.peers.roe ?? null, 'pct', 'Peers', src.peers ?? 'You', 'Scales the peer P/B to this company’s return on equity'),
     I('peg_peer', 'Peer PEG', a.peers.peg, 'x', 'Peers', src.peers ?? 'You'),
   ];
   if (a.aiMode) {

@@ -109,7 +109,7 @@ export function ModelCard({
           )}
         </div>
       </div>
-      {!ok && sheet.message && <p className="mt-2 text-sm text-muted">{sheet.message}</p>}
+      {sheet.message && <p className="mt-2 text-sm text-muted">{sheet.message}</p>}
       {note && (
         <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-3">
           <div>

@@ -260,7 +260,10 @@ export default function Methodology() {
               ['Gordon growth', 'V = D₁ / (re - g).'],
               ['Two-stage DDM', 'Five years of dividends at stage-1 growth, then Gordon.'],
               ['H-model', 'V = D₀(1 + gL)/(re - gL) + D₀ × H × (gS - gL)/(re - gL), for growth that fades in a straight line.'],
-              ['Multiples', 'Company metric × peer multiple; enterprise multiples subtract net debt. Negative bases are skipped.'],
+              [
+                'Multiples',
+                'Company metric × peer multiple; enterprise multiples subtract net debt, with equity floored at zero. EV/Sales is scaled by the company’s margin over the peers’ margin and P/B by its return on equity over theirs (down without limit, up by at most 1.5×), since a revenue or book multiple is only fair at similar profitability. Loss-makers are not valued on revenue or book, P/B is left out where peers trade above 10× book, and a result resting on one multiple says so.',
+              ],
               ['Reverse DCF', 'Bisection on stage-1 growth until the FCFF value equals the share price.'],
               ['Scenarios', 'Three FCFF models with their own growth, margin and capex, weighted by probability, with extra shares for dilution.'],
             ].map(([k, v]) => (
@@ -294,7 +297,9 @@ export default function Methodology() {
           <p className="mt-4">
             A company creates value only when its return on invested capital beats its WACC. The value-creation tab shows that spread over ten years, where
             the cash went (capex, acquisitions, dividends, buybacks), stock pay as a share of revenue, net debt to EBITDA and interest coverage. Banks and
-            insurers are shown on return on equity against the cost of equity.
+            insurers are shown on return on equity against the cost of equity. When cash or negative book equity leaves invested capital below a quarter of
+            gross capital (book equity plus debt), the ratio stops measuring anything (Palantir would show 655%), so it is reported as not meaningful and
+            the page points to return on equity and the operating margin instead.
           </p>
 
           <H2 id="uncertainty">Sensitivity and uncertainty</H2>

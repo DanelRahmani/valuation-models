@@ -24,6 +24,7 @@ export function buildMetrics(companies: CompanyFile[], market: MarketFile): Metr
       margin: round(m.margin),
       growth: round(m.growth),
       roic: round(m.roic),
+      roe: round(m.roe),
       leverage: round(m.leverage, 2),
       evEbitda: round(m.evEbitda, 2),
       evSales: round(m.evSales, 2),

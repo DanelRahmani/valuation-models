@@ -152,7 +152,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
       src.erp = market.erpSource;
     }
     if (ind) {
-      a.peers = { pe: ind.pe, evEbitda: ind.evEbitda, evSales: ind.evSales, pb: ind.pb, peg: ind.peg };
+      a.peers = { pe: ind.pe, evEbitda: ind.evEbitda, evSales: ind.evSales, pb: ind.pb, peg: ind.peg, margin: ind.operatingMargin ?? null, roe: ind.roe ?? null };
       src.peers = `Damodaran industry average: ${ind.name}`;
     }
     return { a, src };
@@ -187,19 +187,19 @@ function Valuation({ ticker, h, company, market }: Loaded) {
 
   const peers = usePeers(ticker);
   const applyPeerMedians = (m: PeerMultiples) => {
-    set('peers', { pe: m.pe, evEbitda: m.evEbitda, evSales: m.evSales, pb: m.pb, peg: a.peers.peg }, `Median of ${m.count} S&P 500 peers`);
+    set('peers', { pe: m.pe, evEbitda: m.evEbitda, evSales: m.evSales, pb: m.pb, peg: a.peers.peg, margin: m.margin, roe: m.roe }, `Median of ${m.count} S&P 500 peers`);
     setPeerSource('sp500');
   };
   const applyDamodaran = () => {
     if (!ind) return;
-    set('peers', { pe: ind.pe, evEbitda: ind.evEbitda, evSales: ind.evSales, pb: ind.pb, peg: ind.peg }, `Damodaran industry average: ${ind.name}`);
+    set('peers', { pe: ind.pe, evEbitda: ind.evEbitda, evSales: ind.evSales, pb: ind.pb, peg: ind.peg, margin: ind.operatingMargin ?? null, roe: ind.roe ?? null }, `Damodaran industry average: ${ind.name}`);
     setPeerSource('damodaran');
   };
 
   // Peer multiples follow the industry unless the user typed their own or chose S&P peers.
   useEffect(() => {
     if (!ind || (src.peers && src.peers === 'You') || peerSource === 'sp500') return;
-    set('peers', { pe: ind.pe, evEbitda: ind.evEbitda, evSales: ind.evSales, pb: ind.pb, peg: ind.peg }, `Damodaran industry average: ${ind.name}`);
+    set('peers', { pe: ind.pe, evEbitda: ind.evEbitda, evSales: ind.evSales, pb: ind.pb, peg: ind.peg, margin: ind.operatingMargin ?? null, roe: ind.roe ?? null }, `Damodaran industry average: ${ind.name}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [industry]);
 
