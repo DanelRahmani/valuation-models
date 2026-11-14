@@ -9,6 +9,8 @@ const SECTIONS = [
   ['rates', 'Discount rates'],
   ['forecast', 'Forecast'],
   ['models', 'The models'],
+  ['financials', 'Banks and insurers'],
+  ['validation', 'Validation'],
   ['consistency', 'Consistency'],
   ['ai', 'Valuing AI companies'],
   ['limits', 'Limits'],
@@ -35,7 +37,7 @@ const SOURCES: { name: string; href: string; what: string; how: string }[] = [
     name: 'SEC EDGAR: XBRL company facts (bulk)',
     href: 'https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip',
     what: 'Every financial figure companies tag in their 10-K filings.',
-    how: 'Downloaded once a month (about 1 GB), trimmed to around twenty concepts per company.',
+    how: 'Downloaded once a month (about 1 GB), trimmed to the few dozen concepts the models use.',
   },
   {
     name: 'SEC EDGAR: company facts API',
@@ -92,6 +94,12 @@ const SOURCES: { name: string; href: string; what: string; how: string }[] = [
     how: 'Monthly returns for the beta regression, and the latest close. Raw prices are not republished.',
   },
   {
+    name: 'Nasdaq: quote summary',
+    href: 'https://www.nasdaq.com/market-activity/stocks/aapl',
+    what: 'Market capitalisation for each stock.',
+    how: 'A cross-check on the SEC share count, to catch splits and mergers after the latest filing.',
+  },
+  {
     name: 'Yahoo Finance: price history',
     href: 'https://finance.yahoo.com/',
     what: 'The same price data from a second provider.',
@@ -134,9 +142,35 @@ export default function Methodology() {
           <H2 id="data">Data</H2>
           <p className="mt-4">
             Financials come from SEC EDGAR XBRL company facts: annual 10-K values only, de-duplicated so restated figures replace the originals. Companies tag
-            the same concept differently (revenue alone has five common tags), so each line item has an ordered list of fallback tags. Hover any historical
+            the same concept differently (revenue alone has five common tags), so each line item has an ordered list of fallback tags. A figure is only used
+            for the fiscal year it belongs to: if the latest 10-K lacks an item, it shows as missing rather than borrowing an older year. Hover any historical
             figure on a valuation page to see the tag, period and filing date behind it.
           </p>
+          <ul className="mt-4 list-disc space-y-2 pl-5">
+            <li>
+              <strong>Operating income:</strong> about ninety large filers (Johnson &amp; Johnson, Lilly, Exxon) report no operating subtotal. It is rebuilt as
+              pre-tax income minus non-operating items (the total if tagged, otherwise interest expense, other non-operating income and interest income). On
+              366 companies that do report it, this rule lands within 10% for 72% and within 25% for 84%.
+            </li>
+            <li>
+              <strong>D&amp;A:</strong> where a company reports only depreciation and books acquired-intangible amortization on its own line (AMD,
+              Microsoft, Alphabet), the two are added together. Oil and gas producers&apos; exploration and development spending counts as capex.
+            </li>
+            <li>
+              <strong>Total debt:</strong> filers split debt across many tags. Several recipes each add up one consistent set of lines (current plus
+              long-term debt, notes plus credit lines, and so on). A recipe can miss debt but never count it twice, so the largest is used. Operating
+              leases are left out. If no debt is found but the company pays interest, the page says so.
+            </li>
+            <li>
+              <strong>Shares:</strong> the latest cover-page count from any 10-K or 10-Q, so a split after the fiscal year is picked up. It is checked
+              against Nasdaq&apos;s market capitalisation; if the two disagree by more than 40% (a merger or reverse split after the last filing, or a
+              company with several share classes), market cap divided by price is used.
+            </li>
+            <li>
+              <strong>Tax rate:</strong> total tax over total pre-tax income for the last three years. When that is negative or above 40%, the US
+              statutory 21% is used instead.
+            </li>
+          </ul>
 
           <H2 id="refresh">Monthly refresh</H2>
           <p className="mt-4">
@@ -145,7 +179,7 @@ export default function Methodology() {
           </p>
           <ol className="mt-4 list-decimal space-y-2 pl-5">
             <li>Refresh the S&amp;P 500 list and map each ticker to its SEC filer.</li>
-            <li>Download SEC&apos;s nightly bulk file and keep the twenty concepts the models use.</li>
+            <li>Download SEC&apos;s nightly bulk file and keep the concepts the models use.</li>
             <li>Fetch the 10-year Treasury yield, Damodaran&apos;s risk premium, industry betas and multiples.</li>
             <li>Regress five years of monthly returns for each stock on SPY and keep only the statistics.</li>
             <li>Commit the result, which redeploys the site.</li>
@@ -169,14 +203,17 @@ export default function Methodology() {
             </li>
             <li>
               <strong>Beta:</strong> an OLS regression of monthly stock returns on SPY returns over five years, reported with R², standard error and a 95%
-              interval. One company&apos;s regression is noisy, so the site also offers the Blume adjustment (0.67β + 0.33) and Damodaran&apos;s industry beta
-              relevered at the company&apos;s own debt-to-equity. When R² is low, the industry beta is usually the better estimate.
+              interval. One company&apos;s regression is noisy. When R² is at least 0.2, the default is the Blume adjustment (0.67β + 0.33), which pulls
+              the estimate toward the market average of 1. Below that, stock returns say little about market risk (Coca-Cola&apos;s R² is 0.07), so the
+              default is Damodaran&apos;s industry beta relevered at the company&apos;s own debt-to-equity, as long as the industry has at least ten firms.
+              Every option is shown with its beta, the cost of equity it implies and the evidence behind it, so switching is one click.
             </li>
           </ul>
           <F>Hamada: βL = βU × (1 + (1 - t) × D/E)</F>
           <ul className="list-disc space-y-2 pl-5">
             <li>
-              <strong>Cost of debt:</strong> interest expense over total debt, bounded below by the risk-free rate.
+              <strong>Cost of debt:</strong> interest expense over total debt, kept between the risk-free rate plus 1% (a minimal investment-grade
+              spread) and plus 8%.
             </li>
             <li>
               <strong>Which rate where:</strong> FCFF uses WACC; FCFE, residual income and the dividend models use the cost of equity; APV uses the unlevered cost
@@ -190,6 +227,20 @@ export default function Methodology() {
             to a target over a chosen number of years. Capex and D&amp;A are percentages of revenue (three-year averages by default), and working capital
             absorbs a share of each new dollar of revenue. Defaults are a starting point, not a forecast.
           </p>
+          <ul className="mt-4 list-disc space-y-2 pl-5">
+            <li>
+              <strong>Stage-1 growth:</strong> the median of the last three annual revenue growth rates, between -10% and 20%. The median ignores a single
+              merger year or post-COVID rebound that a CAGR would project forward; few large companies sustain more than 20% for five years.
+            </li>
+            <li>
+              <strong>One-off charges:</strong> when impairments of goodwill, intangibles or long-lived assets exceed 1% of revenue, the forecast margin adds
+              them back and the page says by how much. They are non-cash and do not recur.
+            </li>
+            <li>
+              <strong>Steady state:</strong> if capex runs above D&amp;A, it falls to D&amp;A between years 6 and 10, because a mature company spends roughly
+              what it depreciates. Capex below D&amp;A (amortisation of acquired intangibles, which never needs replacing) is left alone.
+            </li>
+          </ul>
           <F>FCFF = EBIT × (1 - t) + D&amp;A - capex - ΔNWC</F>
           <F>Terminal value = FCFF₁₀ × (1 + g) / (WACC - g), or EBITDA₁₀ × exit multiple</F>
           <p className="mt-4">
@@ -217,6 +268,34 @@ export default function Methodology() {
               </div>
             ))}
           </dl>
+
+          <H2 id="financials">Banks and insurers</H2>
+          <p className="mt-4">
+            A bank borrows to lend: debt is its raw material, not financing, so enterprise value and free cash flow to the firm mean nothing. For banks,
+            insurers, brokers and asset managers the site turns off FCFF, FCFE, APV and the enterprise multiples. Residual income runs on book equity
+            instead: book grows at its own recent pace, earns the recent return on equity for five years, and then half the gap to the cost of equity
+            closes by year 10. A bank that earns exactly its cost of equity is worth its book value. Dividend models, P/E and P/B apply as usual.
+          </p>
+          <p className="mt-4">
+            Peer multiples come from Damodaran&apos;s industry averages. P/E is aggregate market cap over the net income of profitable firms: the simple
+            average P/E is blown up by firms with tiny earnings (pharma reads 335× on it, 25× on this).
+          </p>
+
+          <H2 id="validation">Checked against an independent source</H2>
+          <p className="mt-4">
+            Every S&amp;P 500 company was run through the models and its revenue, operating income, net income, D&amp;A, cash, debt, equity and market
+            cap compared with Nasdaq&apos;s independently compiled statements. Gaps that remain are mostly definitions: Nasdaq counts leases and captive
+            finance arms as debt, and contract-cost amortisation as D&amp;A. When a default lands far from the price, the page says why (thin equity,
+            a discount rate close to growth, a stale filing, one-off charges) rather than hiding it.
+          </p>
+          <p className="mt-4">
+            The checks are automated. Every company&apos;s figures are tested against the rest of its own filing: net income over diluted shares must
+            reproduce the EPS the company reports, debt cannot exceed total liabilities, cash cannot exceed assets, and price times shares must give
+            the market cap. Each month the snapshot also compares revenue, net income and equity with Nasdaq and refuses to publish if fewer than 90%
+            agree within 2% (in November 2026: revenue 97%, net income 98%, equity 99%). Filings that broke an earlier version of the code are kept as
+            regression tests, so the same bug cannot come back unnoticed. The few remaining errors are tagging mistakes in the filings themselves,
+            listed with the reason in the repository.
+          </p>
 
           <H2 id="consistency">Consistency</H2>
           <p className="mt-4">

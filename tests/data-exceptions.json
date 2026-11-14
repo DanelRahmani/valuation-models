@@ -1,0 +1,9 @@
+{
+  "_about": "Known data-check errors caused by the filing itself, not by this code. Each entry: ticker -> check id -> reason. The data-checks test fails on any error not listed here, and on any entry that no longer occurs (so the list cannot rot).",
+  "APA": {
+    "missing-core": "APA tags revenue only by product (oil, gas, NGL) with dimensions; the company-level revenue total is not in SEC company facts."
+  },
+  "LHX": {
+    "missing-core": "L3Harris tagged full-year FY2025 revenue ($21.9B) with a start date of 2025-10-04, so it reads as a quarter."
+  }
+}

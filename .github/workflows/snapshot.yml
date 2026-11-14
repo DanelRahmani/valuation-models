@@ -43,6 +43,11 @@ jobs:
             npx tsx scripts/snapshot.ts
           fi
 
+      - name: Test the new data
+        run: |
+          npx tsc --noEmit
+          npx vitest run
+
       - name: Disk and data size
         if: always()
         run: |
