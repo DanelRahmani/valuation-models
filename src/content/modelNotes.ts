@@ -71,7 +71,7 @@ export const MODEL_NOTES: Partial<Record<ModelId, ModelNote>> = {
   reverse: {
     short: 'Reverse DCF',
     bestFor: 'Anything priced on expectations: asking what the price already assumes.',
-    watchOut: 'Solves for one variable only (stage-1 growth). Margins and reinvestment stay where you set them.',
+    watchOut: 'Solves for one variable only (where the growth path starts), reported as average growth over years 1-5. Margins and reinvestment stay where you set them.',
     ai: 'The most useful lens for AI valuations: turn a headline price into a growth rate you can judge.',
   },
 };

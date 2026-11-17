@@ -35,6 +35,15 @@ export interface Assumptions {
   /** True when no capital spending was found in the filings and capex was set equal to D&A. */
   capexMissing?: boolean;
   hHalfLife: number;
+  /** Growth path calibration (scripts/calibrate-growth.ts): typical nominal growth, the share of a company's excess growth
+   * left next year, and the share that lasts for years. */
+  gTypical?: number;
+  gFade?: number;
+  gKeep?: number;
+  /** How growth above typical fades: 'research' (McKinsey's decay, the default) or 'base' (backtested on this site's data). */
+  growthMode?: GrowthMode;
+  /** Research mode: share of growth above typical that carries into each next year. */
+  gDecay?: number;
   /** Peer multiples, plus the peers' operating margin that their EV/Sales goes with. */
   peers: { pe: number | null; evEbitda: number | null; evSales: number | null; pb: number | null; peg: number | null; margin?: number | null; roe?: number | null };
   aiMode: boolean;
@@ -79,6 +88,25 @@ function pooledRatio(h: Historicals, num: LineItem, den: LineItem, n = 3): numbe
   });
   return sb > 0 ? sa / sb : null;
 }
+
+/**
+ * Revenue growth path, estimated from the site's own data (449 non-financial S&P 500 companies, growth 2017-2025) by
+ * scripts/calibrate-growth.ts: year-ahead excess growth over the yearly median regressed on this year's.
+ * - typical: median nominal revenue growth across companies and years.
+ * - fade: share of this year's excess growth still there next year (0.23 all years, 0.33 without 2020-22).
+ * - keep: share still there four to five years later (0.15-0.27): some companies are structural growers.
+ */
+export const GROWTH_CAL = { typical: 0.06, fade: 0.3, keep: 0.2 } as const;
+
+/**
+ * Research default: McKinsey's Valuation (Koller, Goedhart and Wessels) finds companies growing above 20% a year
+ * typically slow to about 8% within five years and about 5% within ten. Growth above typical that keeps 70% each year
+ * (half the gap closes every two years) reproduces that path; Chan, Karceski and Lakonishok (2003) find growth has
+ * little persistence in general.
+ */
+export const GROWTH_RESEARCH = { typical: 0.06, decay: 0.7 } as const;
+
+export type GrowthMode = 'research' | 'base';
 
 /** Below this R², stock returns say too little about market risk and the industry beta is used instead. */
 export const MIN_BETA_R2 = 0.2;
@@ -224,11 +252,18 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
     .sort((x, y) => x - y);
   const cagr = yoy.length ? yoy[Math.floor(yoy.length / 2)] : null;
   void r0;
-  const g1 = cagr != null ? clamp(cagr, -0.1, 0.2) : 0.05;
+  // The forecast starts from the latest year's revenue growth and fades it as S&P 500 companies' growth has actually
+  // faded (GROWTH_CAL), so a boom is respected without being projected forward and no growth cap is needed. The median
+  // of the last three years stands in when the latest year is missing. The wide bounds only stop data errors.
+  const lastTwo = revs.slice(-2);
+  const latestG =
+    lastTwo.length === 2 && lastTwo[0] && lastTwo[1] && lastTwo[0].value > 0 ? lastTwo[1].value / lastTwo[0].value - 1 : null;
+  const gStart = latestG ?? cagr;
+  const g1 = gStart != null ? clamp(gStart, -0.5, 1.5) : 0.05;
   src.g1 =
-    cagr == null
+    gStart == null
       ? 'Default 5%'
-      : `Median revenue growth of the last ${yoy.length} years${cagr > 0.2 ? ` (${(cagr * 100).toFixed(0)}%), capped at 20%: few large companies sustain more for five years` : cagr < -0.1 ? `, floored at -10%` : ''}`;
+      : `${latestG != null ? `FY${fy} revenue growth` : `Median revenue growth of the last ${yoy.length} years`}; the forecast fades it as S&P 500 growth has faded`;
   const gT = Math.min(0.025, rf);
   src.gT = 'Long-run nominal growth, capped at the risk-free rate';
 
@@ -316,6 +351,11 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
     totalPayout,
     capexMissing,
     hHalfLife: 5,
+    gTypical: GROWTH_CAL.typical,
+    gFade: GROWTH_CAL.fade,
+    gKeep: GROWTH_CAL.keep,
+    growthMode: 'research',
+    gDecay: GROWTH_RESEARCH.decay,
     peers: { pe: null, evEbitda: null, evSales: null, pb: null, peg: null },
     aiMode: false,
     newShares: 0,
@@ -367,7 +407,23 @@ export function inputDefs(a: Assumptions, src: Sources, h: Historicals): InputDe
     I('wacc', 'WACC', '=(1-w_debt)*re+w_debt*rd*(1-tax)', 'pct', 'Cost of capital', 'E/V × re + D/V × rd × (1 - t)'),
     I('beta_u', 'Unlevered beta (Hamada)', '=beta_l/(1+(1-tax)*de_ratio)', 'beta', 'Cost of capital', 'β / (1 + (1 - t) D/E)'),
     I('ru', 'Unlevered cost of equity', '=rf+beta_u*erp', 'pct', 'Cost of capital', 'rf + βu × ERP'),
-    I('g_stage1', a.financial ? 'Book equity growth, years 1-5' : 'Revenue growth, years 1-5', a.g1, 'pct', 'Forecast', src.g1),
+    I('g_stage1', a.financial ? 'Book equity growth, years 1-5' : 'Revenue growth, latest year (the forecast starts here)', a.g1, 'pct', 'Forecast', src.g1),
+    I('g_typical', 'Typical company growth, year 1', a.gTypical ?? GROWTH_CAL.typical, 'pct', 'Forecast', 'Median S&P 500 revenue growth, 2017-2025; slides to terminal growth by year 10'),
+    ...((a.growthMode ?? 'research') === 'research'
+      ? [
+          I(
+            'g_decay',
+            'Growth path (research): excess growth kept each year',
+            a.gDecay ?? GROWTH_RESEARCH.decay,
+            'pct',
+            'Forecast',
+            'McKinsey, Valuation: growth above 20% typically falls to about 8% within five years and 5% within ten',
+          ),
+        ]
+      : [
+          I('g_fade', 'Growth path (base rates): excess growth left after one year', a.gFade ?? GROWTH_CAL.fade, 'pct', 'Forecast', 'Backtested on S&P 500 revenue, 2017-2025'),
+          I('g_keep', 'Growth path (base rates): excess growth that lasts', a.gKeep ?? GROWTH_CAL.keep, 'pct', 'Forecast', 'Backtested on S&P 500 revenue, 2017-2025: the part still there four to five years on'),
+        ]),
     I('roe', 'Return on equity', a.roe, 'pct', 'Forecast', src.roe),
     I('g_terminal', 'Terminal growth', a.gT, 'pct', 'Forecast', src.gT),
     I('margin_0', 'Operating margin, now', a.margin0, 'pct', 'Forecast', src.margin0),
@@ -392,7 +448,7 @@ export function inputDefs(a: Assumptions, src: Sources, h: Historicals): InputDe
       const sc = a.scenarios[s];
       const name = s[0].toUpperCase() + s.slice(1);
       defs.push(
-        I(`g1_${s}`, `${name}: growth, years 1-5`, sc.g1, 'pct', 'Scenarios', 'You'),
+        I(`g1_${s}`, `${name}: revenue growth, year 1`, sc.g1, 'pct', 'Scenarios', 'You'),
         I(`margin_${s}`, `${name}: target margin`, sc.margin, 'pct', 'Scenarios', 'You'),
         I(`capex_${s}`, `${name}: capex, % of revenue`, sc.capexPct, 'pct', 'Scenarios', 'You'),
         I(`prob_${s}`, `${name}: probability`, sc.prob, 'pct', 'Scenarios', 'You'),

@@ -49,7 +49,7 @@ export async function exportWorkbook(
     'Mathematical valuations under stated assumptions. Not investment advice.',
     'Data: SEC EDGAR XBRL company facts; market inputs as shown on the Inputs sheet with their sources.',
     out.reverse.growth != null
-      ? `Reverse DCF: the price implies ${(out.reverse.growth * 100).toFixed(1)}% stage-1 revenue growth (solved by bisection; use Goal Seek on FCFF to confirm).`
+      ? `Reverse DCF: the price implies ${(out.reverse.growth * 100).toFixed(1)}% average revenue growth over years 1-5 on the model's growth path (solved by bisection on latest-year growth; use Goal Seek on FCFF to confirm).`
       : `Reverse DCF: ${out.reverse.message}`,
     ...out.warnings.map((w) => `Note: ${w}`),
   ].forEach((t, i) => {

@@ -67,6 +67,9 @@ interface Story {
   f: Record<string, (number | null)[]>;
   wacc: number;
   g1: number;
+  /** Average revenue growth over years 1-5 on the model's path, and which path it is. */
+  avg5: number | null;
+  pathName: string;
   gT: number;
   tax: number;
   debt: number;
@@ -115,6 +118,8 @@ export function buildStory(name: string, h: Historicals, out: RunOutput): Story 
     f,
     wacc: I.wacc,
     g1: I.g_stage1 ?? 0,
+    avg5: out.reverse.modelGrowth,
+    pathName: I.g_decay != null ? 'research growth path' : 'base-rate growth path',
     gT: I.g_terminal ?? 0,
     tax: I.tax ?? 0,
     debt: I.debt ?? 0,
@@ -637,7 +642,7 @@ function Implied({ s }: { s: Story }) {
   // Three growth rates side by side: what the company did, what the FCFF model assumes, and what the price needs.
   const g = [
     ...(s.pastGrowth != null ? [{ k: compact ? 'Past 3 yrs' : 'Last 3 years', sub: 'median, actual', v: s.pastGrowth, cls: 'fill-panel-strong', stroke: true }] : []),
-    { k: compact ? 'FCFF model' : 'FCFF model assumes', sub: compact ? 'assumes' : 'this walkthrough', v: s.g1, cls: 'fill-accent/40', stroke: true },
+    ...(s.avg5 != null ? [{ k: compact ? 'FCFF model' : 'FCFF model assumes', sub: compact ? 'assumes' : s.pathName, v: s.avg5, cls: 'fill-accent/40', stroke: true }] : []),
     ...(s.reverse != null ? [{ k: compact ? 'Price' : 'The price implies', sub: compact ? 'implies' : 'reverse FCFF', v: s.reverse, cls: 'fill-accent', stroke: false }] : []),
   ];
   const max = Math.max(0.05, ...g.map((x) => Math.abs(x.v))) * 1.2;
@@ -662,7 +667,7 @@ function Implied({ s }: { s: Story }) {
         </g>
       ))}
       <text x={W / 2} y={TOP} textAnchor="middle" className={label}>
-        revenue growth a year, years 1–5
+        average revenue growth a year, years 1–5
       </text>
     </g>
   );
@@ -706,7 +711,7 @@ function Caption({ s, step, reduced }: { s: Story; step: number; reduced: boolea
     case 2:
       return (
         <>
-          Revenue grows {pct(s.g1)} a year for five years, then slows to {pct(s.gT)}. These are the cash flows the business should produce.
+          Growth starts from last year&apos;s {pct(s.g1)} and fades as fast growers&apos; growth usually does, averaging {pct(s.avg5)} over five years and reaching {pct(s.gT)} by year 10 ({s.pathName}). These are the cash flows the business should produce.
         </>
       );
     case 3:
@@ -734,7 +739,7 @@ function Caption({ s, step, reduced }: { s: Story; step: number; reduced: boolea
     default:
       return s.reverse != null ? (
         <>
-          Keeping everything else in the FCFF model fixed, today&apos;s price needs revenue to grow {pct(s.reverse)} a year for five years. The model assumes {pct(s.g1)}
+          Keeping everything else in the FCFF model fixed, today&apos;s price needs revenue to grow {pct(s.reverse)} a year on average for five years. The model assumes {pct(s.avg5)} on the {s.pathName}
           {s.pastGrowth != null ? `; the last three years ran at ${pct(s.pastGrowth)}` : ''}. The question is which you believe.
         </>
       ) : (

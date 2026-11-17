@@ -23,6 +23,10 @@ export const SHARE_KEYS = {
   nwcPct: 'wc',
   exitMultiple: 'xm',
   roe: 'roe',
+  gTypical: 'gty',
+  gDecay: 'gd',
+  gFade: 'gf',
+  gKeep: 'gk',
 } as const satisfies Partial<Record<keyof Assumptions, string>>;
 
 type NumKey = keyof typeof SHARE_KEYS;
@@ -33,6 +37,7 @@ export interface ShareState {
   beta?: BetaChoice;
   simple?: boolean;
   terminal?: 'gordon' | 'exit';
+  growth?: 'research' | 'base';
   /** Assumption overrides. */
   over: Partial<Record<NumKey, number | null>>;
 }
@@ -49,6 +54,7 @@ export function encodeShare(s: { ticker: string; beta: BetaChoice; defaultBeta: 
   if (s.beta !== s.defaultBeta && s.beta !== 'upload') p.set('beta', s.beta);
   if (s.simple) p.set('view', 'simple');
   if (s.a.terminalMethod !== s.defaults.terminalMethod) p.set('tv', s.a.terminalMethod);
+  if ((s.a.growthMode ?? 'research') !== (s.defaults.growthMode ?? 'research')) p.set('gm', s.a.growthMode ?? 'research');
   for (const [k, short] of Object.entries(SHARE_KEYS) as [NumKey, string][]) {
     // A beta that follows the chosen method is restored from the method; only a typed beta is encoded.
     if (k === 'beta' && s.beta !== 'manual') continue;
@@ -66,6 +72,8 @@ export function decodeShare(search: string | URLSearchParams): ShareState {
   if (p.get('view') === 'simple') out.simple = true;
   const tv = p.get('tv');
   if (tv === 'gordon' || tv === 'exit') out.terminal = tv;
+  const gm = p.get('gm');
+  if (gm === 'research' || gm === 'base') out.growth = gm;
   for (const [k, short] of Object.entries(SHARE_KEYS) as [NumKey, string][]) {
     if (!p.has(short)) continue;
     const raw = p.get(short)!;
@@ -81,5 +89,6 @@ export function applyShare(a: Assumptions, s: ShareState): Assumptions {
   const next = { ...a } as Assumptions;
   for (const [k, v] of Object.entries(s.over) as [NumKey, number | null][]) (next as unknown as Record<string, unknown>)[k] = v;
   if (s.terminal) next.terminalMethod = s.terminal;
+  if (s.growth) next.growthMode = s.growth;
   return next;
 }

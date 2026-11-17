@@ -394,8 +394,9 @@ function Valuation({ ticker, h, company, market }: Loaded) {
         <p className="mt-3 font-serif text-2xl leading-snug sm:text-3xl">
           {out.reverse.growth != null && price != null ? (
             <>
-              To justify {fmt(price, 'usd')}, revenue must grow about <span className="text-accent">{fmt(out.reverse.growth, 'pct')}</span> a year for five
-              years, then fade to {fmt(a.gT, 'pct')}, at a {fmt(a.marginTarget, 'pct')} operating margin.
+              To justify {fmt(price, 'usd')}, revenue must grow about <span className="text-accent">{fmt(out.reverse.growth, 'pct')}</span> a year on average
+              over the next five years, then fade to {fmt(a.gT, 'pct')}, at a {fmt(a.marginTarget, 'pct')} operating margin. The model assumes{' '}
+              {fmt(out.reverse.modelGrowth, 'pct')} on the {(a.growthMode ?? 'research') === 'research' ? 'research' : 'base-rate'} growth path.
             </>
           ) : (
             out.reverse.message
@@ -556,12 +557,41 @@ function Valuation({ ticker, h, company, market }: Loaded) {
               </label>
             )}
             <NumberField
-              label={a.financial ? 'Book equity growth, years 1-5' : 'Revenue growth, years 1-5'}
+              label={a.financial ? 'Book equity growth, years 1-5' : 'Revenue growth, latest year'}
               value={a.g1}
               fmt="pct"
               source={src.g1}
               onChange={(v) => set('g1', v ?? 0)}
             />
+            {!a.financial && (
+              <>
+                <label className="flex items-center justify-between gap-3 py-2 text-sm">
+                  <span>Growth path</span>
+                  <select
+                    value={a.growthMode ?? 'research'}
+                    onChange={(e) => set('growthMode', e.target.value as 'research' | 'base')}
+                    className="rounded border border-seam bg-transparent px-2 py-1"
+                  >
+                    <option value="research">Research (McKinsey)</option>
+                    <option value="base">Base rates (S&amp;P 500 backtest)</option>
+                  </select>
+                </label>
+                <p className="-mt-1 pb-2 text-xs text-muted">
+                  {(a.growthMode ?? 'research') === 'research'
+                    ? 'In use: growth above a typical 6% keeps 70% of itself each year, the decay McKinsey observed in fast growers (about 8% after five years). Typical growth slides to terminal growth by year 10.'
+                    : 'In use: measured on this site’s S&P 500 data, 2017-2025. Only 30% of growth above a typical 6% is left after a year; 20% lasts for years and fades out by year 10. Stricter than the research path.'}
+                </p>
+                {(a.growthMode ?? 'research') === 'research' ? (
+                  <NumberField label="Excess growth kept each year" value={a.gDecay ?? 0.7} fmt="pct" source="McKinsey, Valuation" onChange={(v) => set('gDecay', v ?? 0.7)} />
+                ) : (
+                  <>
+                    <NumberField label="Excess growth left after a year" value={a.gFade ?? 0.3} fmt="pct" source="S&P 500 backtest, 2017-2025" onChange={(v) => set('gFade', v ?? 0.3)} />
+                    <NumberField label="Excess growth that lasts" value={a.gKeep ?? 0.2} fmt="pct" source="S&P 500 backtest, 2017-2025" onChange={(v) => set('gKeep', v ?? 0.2)} />
+                  </>
+                )}
+                <NumberField label="Typical company growth" value={a.gTypical ?? 0.06} fmt="pct" source="Median S&P 500 revenue growth, 2017-2025" onChange={(v) => set('gTypical', v ?? 0.06)} />
+              </>
+            )}
             {a.financial && <NumberField label="Return on equity" value={a.roe} fmt="pct" source={src.roe} onChange={(v) => set('roe', v)} />}
             <NumberField label="Terminal growth" value={a.gT} fmt="pct" source={src.gT} onChange={(v) => set('gT', v ?? 0)} />
             <NumberField label="Operating margin, target" value={a.marginTarget} fmt="pct" source={src.marginTarget} onChange={(v) => set('marginTarget', v)} />
@@ -589,7 +619,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
                   <Label>{k} case</Label>
                   {(
                     [
-                      ['g1', 'Growth, years 1-5'],
+                      ['g1', 'Revenue growth, latest year'],
                       ['margin', 'Target margin'],
                       ['capexPct', 'Capex, % of revenue'],
                       ['prob', 'Probability'],

@@ -35,7 +35,7 @@ export function SimpleView({ name, h, a, out, field, onExpert }: { name: string;
     );
   if (out.reverse.growth != null && price != null)
     sentences.push(
-      `To justify today's price, revenue would need to grow ${pct(out.reverse.growth)} a year for five years${past != null ? `, against a median of ${pct(past)} over the last three` : ''}.`,
+      `To justify today's price, revenue would need to grow ${pct(out.reverse.growth)} a year on average over the next five years; the model assumes ${pct(out.reverse.modelGrowth)} on the ${(a.growthMode ?? 'research') === 'research' ? 'research growth path' : 'base-rate growth path'}${past != null ? `, and the last three years ran at a median of ${pct(past)}` : ''}.`,
     );
   else if (out.reverse.message) sentences.push(out.reverse.message);
 
