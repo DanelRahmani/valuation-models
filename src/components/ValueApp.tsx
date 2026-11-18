@@ -600,7 +600,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
               </label>
             )}
             <NumberField
-              label={a.financial ? 'Book equity growth, years 1-5' : 'Revenue growth, latest year'}
+              label={a.financial ? 'Book equity growth, years 1-5' : a.basis === 'ttm' ? 'Revenue growth, last 12 months' : 'Revenue growth, latest year'}
               value={a.g1}
               fmt="pct"
               source={src.g1}
