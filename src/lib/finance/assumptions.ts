@@ -424,7 +424,7 @@ export function inputDefs(a: Assumptions, src: Sources, h: Historicals): InputDe
     I('wacc', 'WACC', '=(1-w_debt)*re+w_debt*rd*(1-tax)', 'pct', 'Cost of capital', 'E/V × re + D/V × rd × (1 - t)'),
     I('beta_u', 'Unlevered beta (Hamada)', '=beta_l/(1+(1-tax)*de_ratio)', 'beta', 'Cost of capital', 'β / (1 + (1 - t) D/E)'),
     I('ru', 'Unlevered cost of equity', '=rf+beta_u*erp', 'pct', 'Cost of capital', 'rf + βu × ERP'),
-    I('g_stage1', a.financial ? 'Book equity growth, years 1-5' : 'Revenue growth, latest year (the forecast starts here)', a.g1, 'pct', 'Forecast', src.g1),
+    I('g_stage1', a.financial ? 'Book equity growth, years 1-5' : `Revenue growth, ${ttm ? 'last 12 months' : 'latest year'} (the forecast starts here)`, a.g1, 'pct', 'Forecast', src.g1),
     I('g_typical', 'Typical company growth, year 1', a.gTypical ?? GROWTH_CAL.typical, 'pct', 'Forecast', 'Median S&P 500 revenue growth, 2017-2025; slides to terminal growth by year 10'),
     ...((a.growthMode ?? 'research') === 'research'
       ? [

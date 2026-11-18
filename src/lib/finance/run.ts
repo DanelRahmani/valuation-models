@@ -144,7 +144,7 @@ function judge(wb: Workbook, v: Values, a: Assumptions): string[] {
   const rev5 = v.sheets.FCFF?.revenue?.[5];
   if (!a.financial && a.g1 > 0.5 && rev5 != null && a.rev0 && a.rev0 > 0)
     warnings.push(
-      `Revenue grew ${(a.g1 * 100).toFixed(0)}% in the latest year (a boom, an acquisition or a spin-off). The forecast fades that growth but still multiplies revenue ${(rev5 / a.rev0).toFixed(1)}× in five years. Check that the growth is organic and repeatable before trusting the DCF values.`,
+      `Revenue grew ${(a.g1 * 100).toFixed(0)}% ${a.basis === 'ttm' ? 'over the last 12 months' : 'in the latest year'} (a boom, an acquisition or a spin-off). The forecast fades that growth but still multiplies revenue ${(rev5 / a.rev0).toFixed(1)}× in five years. Check that the growth is organic and repeatable before trusting the DCF values.`,
     );
   const fcffPs = resultOf(wb, v, 'fcff');
   const px = i.price;
