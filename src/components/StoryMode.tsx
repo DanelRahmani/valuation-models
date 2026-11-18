@@ -4,6 +4,9 @@
  * market implies. Everything is drawn from the same model run the page shows, so the numbers always agree.
  */
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { MODEL_NOTES } from '@/content/modelNotes';
+import type { ModelId } from '@/lib/finance/calcsheet';
+import { medianGrowth } from '@/lib/finance/metrics';
 import type { RunOutput } from '@/lib/finance/run';
 import type { Historicals } from '@/lib/finance/types';
 import { fmt } from '@/lib/format';
@@ -64,6 +67,9 @@ interface Story {
   f: Record<string, (number | null)[]>;
   wacc: number;
   g1: number;
+  /** Average revenue growth over years 1-5 on the model's path, and which path it is. */
+  avg5: number | null;
+  pathName: string;
   gT: number;
   tax: number;
   debt: number;
@@ -73,6 +79,25 @@ interface Story {
   price: number | null;
   reverse: number | null;
   marginTarget: number | null;
+  /** Every model that produced a value, FCFF (the one this walkthrough follows) first. */
+  models: { id: ModelId; label: string; short: string; v: number }[];
+  /** Median revenue growth over the last three years. */
+  pastGrowth: number | null;
+}
+
+/** The models compared on the value-per-share step, in the order the page lists them. */
+const COMPARED: ModelId[] = ['fcff', 'fcfe', 'apv', 'ri', 'total_payout', 'multiples', 'ddm_2stage'];
+const SHORT: Partial<Record<ModelId, string>> = { fcff: 'FCFF', fcfe: 'FCFE', apv: 'APV', ri: 'Resid. income', total_payout: 'Total payout', multiples: 'Multiples', ddm_2stage: 'Dividends' };
+
+/** About `n` round gridline values inside [lo, hi]: steps of 1, 2, 2.5 or 5 times a power of ten. */
+function niceTicks(lo: number, hi: number, n = 3): number[] {
+  const span = hi - lo || Math.abs(hi) || 1;
+  const raw = span / n;
+  const p = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map((k) => k * p).find((s) => s >= raw) ?? 10 * p;
+  const out: number[] = [];
+  for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10));
+  return out;
 }
 
 export function buildStory(name: string, h: Historicals, out: RunOutput): Story | null {
@@ -93,6 +118,8 @@ export function buildStory(name: string, h: Historicals, out: RunOutput): Story 
     f,
     wacc: I.wacc,
     g1: I.g_stage1 ?? 0,
+    avg5: out.reverse.modelGrowth,
+    pathName: I.g_decay != null ? 'research growth path' : 'base-rate growth path',
     gT: I.g_terminal ?? 0,
     tax: I.tax ?? 0,
     debt: I.debt ?? 0,
@@ -102,6 +129,13 @@ export function buildStory(name: string, h: Historicals, out: RunOutput): Story 
     price: I.price ?? null,
     reverse: out.reverse.growth,
     marginTarget: I.margin_target ?? null,
+    models: COMPARED.flatMap((id) => {
+      const r = out.results.find((x) => x.id === id);
+      return r && r.status === 'ok' && r.perShare != null && Number.isFinite(r.perShare) && r.perShare > 0
+        ? [{ id, label: MODEL_NOTES[id]?.short ?? id, short: SHORT[id] ?? id, v: r.perShare }]
+        : [];
+    }),
+    pastGrowth: medianGrowth(h),
   };
 }
 
@@ -243,20 +277,42 @@ function History({ s }: { s: Story }) {
   void compact;
   void big;
   const n = s.years.length;
-  const max = Math.max(1, ...s.revenue.map((v) => v ?? 0));
-  const step = (W - 120) / n;
+  const left = compact ? 84 : 76;
+  const step = (W - left - 30) / n;
   const bw = Math.min(56, step - 14);
-  // Revenue bars in the lower band, the margin line in its own band above them so the two never collide.
+  // Revenue bars in the lower band, the margin line in its own band above them so the two never collide. Each band has
+  // its own faint scale on the left, so the line and the bars can be read, not just admired.
+  const max = Math.max(1, ...s.revenue.map((v) => v ?? 0));
+  const rTicks = niceTicks(0, max, 3);
   const y = (v: number) => BASE - (Math.max(0, v) / max) * (BASE - TOP - 120);
   const mVals = s.margin.filter((m): m is number => m != null);
   const mLo = Math.min(0, ...mVals);
   const mHi = Math.max(0.05, ...mVals);
-  const my = (m: number) => TOP + 12 + (1 - (m - mLo) / (mHi - mLo || 1)) * 64;
-  const pts = s.margin.map((m, i) => (m == null ? null : [70 + i * step + step / 2, my(m)] as const)).filter(Boolean) as (readonly [number, number])[];
+  const mTicks = niceTicks(mLo, mHi, 3);
+  const my = (m: number) => TOP + 14 + (1 - (m - mLo) / (mHi - mLo || 1)) * 64;
+  const cx = (i: number) => left + i * step + step / 2;
+  const pts = s.margin.map((m, i) => (m == null ? null : [cx(i), my(m)] as const)).filter(Boolean) as (readonly [number, number])[];
+  // Trend: the constant growth rate that links the first year to the last, drawn as a curve over the bars.
+  const i0 = s.revenue.findIndex((v) => v != null && v > 0);
+  const r0 = i0 >= 0 ? s.revenue[i0]! : null;
+  const rN = s.revenue.at(-1);
+  const cagr = r0 && rN && rN > 0 && n - 1 > i0 ? Math.pow(rN / r0, 1 / (n - 1 - i0)) - 1 : null;
+  const trend =
+    cagr != null && r0 ? Array.from({ length: n - i0 }, (_, k) => [cx(i0 + k), y(r0 * Math.pow(1 + cagr, k))] as const) : [];
+  const grid = (yy: number, text: string, k: number) => (
+    <g key={text + yy} className="fade-up" style={{ animationDelay: `${k * 60}ms` }}>
+      <line x1={left} x2={W - 20} y1={yy} y2={yy} stroke="var(--seam-color)" strokeOpacity={0.45} strokeDasharray="2 4" />
+      <text x={left - 8} y={yy + 4} textAnchor="end" className={label}>
+        {text}
+      </text>
+    </g>
+  );
   return (
     <g>
+      {rTicks.filter((t) => t > 0).map((t, k) => grid(y(t), money(t), k))}
+      {pts.length > 1 && mTicks.map((t, k) => grid(my(t), pct(t, 0), k + 2))}
       {s.years.map((yr, i) => {
-        const x = 70 + i * step + (step - bw) / 2;
+        const x = left + i * step + (step - bw) / 2;
         const r = s.revenue[i] ?? 0;
         return (
           <g key={yr}>
@@ -274,6 +330,29 @@ function History({ s }: { s: Story }) {
           </g>
         );
       })}
+      {trend.length > 1 && (
+        <>
+          <polyline
+            className="dcf-thread"
+            points={trend.map((p) => p.join(',')).join(' ')}
+            fill="none"
+            stroke="rgb(var(--ink))"
+            strokeOpacity={0.55}
+            strokeWidth={1.5}
+            style={{ ['--len' as string]: 2000, animationDelay: '1700ms' }}
+          />
+          <text
+            x={trend.at(-1)![0] - bw / 2 - 6}
+            y={trend.at(-1)![1] + (compact ? 34 : 28)}
+            textAnchor="end"
+            className={`${label} fade-up`}
+            style={{ animationDelay: '2600ms' }}
+          >
+            trend {cagr! >= 0 ? '+' : ''}
+            {pct(cagr, 0)} a year
+          </text>
+        </>
+      )}
       {pts.length > 1 && (
         <>
           <polyline
@@ -290,10 +369,10 @@ function History({ s }: { s: Story }) {
           <text x={pts.at(-1)![0]} y={pts.at(-1)![1] - 12} textAnchor="end" className="fill-accent font-mono text-[12px] fade-up" style={{ animationDelay: '1500ms' }}>
             operating margin {pct(s.margin.at(-1))}
           </text>
-          <text x={70} y={TOP + 2} className={label}>
+          <text x={left} y={TOP - 2} className={label}>
             operating margin
           </text>
-          <text x={70} y={TOP + 104} className={label}>
+          <text x={left} y={TOP + 104} className={label}>
             revenue
           </text>
         </>
@@ -493,25 +572,64 @@ function PerShare({ s, reduced }: { s: Story; reduced: boolean }) {
   const { label, value, big } = useText();
   void compact;
   void big;
-  const max = Math.max(s.perShare, s.price ?? 0, 1) * 1.15;
-  const y = (v: number) => BASE - (v / max) * (BASE - TOP - 40);
-  const bars = [
-    { k: 'Model value', v: s.perShare, x: W / 2 - (compact ? 150 : 170), cls: 'fill-accent' },
-    ...(s.price != null ? [{ k: 'Share price', v: s.price, x: W / 2 + (compact ? 30 : 50), cls: 'fill-panel-strong' }] : []),
-  ];
+  // One row per model, FCFF (the model this walkthrough followed) first; the share price is a vertical line across all.
+  const rows = s.models.length ? s.models : [{ id: 'fcff' as ModelId, label: 'FCFF DCF', short: 'FCFF', v: s.perShare }];
+  const nameW = compact ? 150 : 170;
+  const x0 = nameW + 10;
+  const x1 = W - (compact ? 150 : 170);
+  const max = Math.max(...rows.map((r) => r.v), s.price ?? 0, 1) * 1.05;
+  const x = (v: number) => x0 + (v / max) * (x1 - x0);
+  const top = TOP + 26;
+  const rowH = Math.min(compact ? 52 : 44, (BASE - top - 6) / rows.length);
+  const bh = Math.min(26, rowH - 12);
   return (
     <g>
-      {bars.map((b, i) => (
-        <g key={b.k}>
-          <rect className={`dcf-bar ${b.cls}`} x={b.x} y={y(b.v)} width={120} height={BASE - y(b.v)} rx={4} stroke={i ? 'var(--seam-color)' : 'none'} style={{ animationDelay: `${i * 250}ms` }} />
-          <text x={b.x + 60} y={y(b.v) - 14} textAnchor="middle" className={`fill-ink font-mono ${big}`}>
-            {i === 0 ? <CountUp to={b.v} reduced={reduced} format={(x) => fmt(x, 'usd')} /> : fmt(b.v, 'usd')}
-          </text>
-          <text x={b.x + 60} y={BASE + 22} textAnchor="middle" className={label}>
-            {b.k}
+      {rows.map((r, i) => {
+        const yy = top + i * rowH;
+        const main = i === 0;
+        const d = s.price ? r.v / s.price - 1 : null;
+        return (
+          <g key={r.id}>
+            <text x={nameW} y={yy + bh / 2 + 5} textAnchor="end" className={main ? `fill-accent font-mono ${compact ? 'text-[16px]' : 'text-[12px]'} font-semibold` : label}>
+              {compact ? r.short : r.label}
+            </text>
+            <rect
+              className={`dcf-bar-x ${main ? 'fill-accent' : 'fill-accent/30'}`}
+              x={x0}
+              y={yy}
+              width={Math.max(2, x(r.v) - x0)}
+              height={bh}
+              rx={3}
+              stroke={main ? 'none' : 'var(--seam-color)'}
+              style={{ animationDelay: `${200 + i * 160}ms` }}
+            />
+            <text x={x(r.v) + 8} y={yy + bh / 2 + 5} className={`${main ? 'fill-ink font-semibold' : 'fill-ink'} font-mono ${compact ? 'text-[16px]' : 'text-[12px]'} fade-up`} style={{ animationDelay: `${500 + i * 160}ms` }}>
+              {main ? <CountUp to={r.v} reduced={reduced} format={(v) => fmt(v, 'usd')} /> : fmt(r.v, 'usd')}
+              {d != null && <tspan className="fill-muted">{` ${d >= 0 ? '+' : '−'}${Math.abs(d * 100).toFixed(0)}%`}</tspan>}
+            </text>
+          </g>
+        );
+      })}
+      {s.price != null && (
+        <g>
+          <line
+            className="dcf-thread"
+            x1={x(s.price)}
+            x2={x(s.price)}
+            y1={BASE}
+            y2={top - 14}
+            stroke="rgb(var(--ink))"
+            strokeWidth={1.5}
+            style={{ ['--len' as string]: 400, animationDelay: `${300 + rows.length * 160}ms` }}
+          />
+          <text x={x(s.price)} y={top - 22} textAnchor="middle" className={`fill-ink font-mono ${compact ? 'text-[16px]' : 'text-[12px]'} fade-up`} style={{ animationDelay: `${600 + rows.length * 160}ms` }}>
+            share price {fmt(s.price, 'usd')}
           </text>
         </g>
-      ))}
+      )}
+      <text x={x0} y={BASE + 22} className={`${label} fade-up`} style={{ animationDelay: '1200ms' }}>
+        {compact ? 'top row: the model this walkthrough followed' : 'top row: the model this walkthrough followed · % = difference from the share price'}
+      </text>
     </g>
   );
 }
@@ -521,29 +639,53 @@ function Implied({ s }: { s: Story }) {
   const { label, value, big } = useText();
   void compact;
   void big;
+  // Three growth rates side by side: what the company did, what the FCFF model assumes, and what the price needs.
   const g = [
-    { k: 'Model assumes', v: s.g1 },
-    ...(s.reverse != null ? [{ k: 'Price implies', v: s.reverse }] : []),
+    ...(s.pastGrowth != null ? [{ k: compact ? 'Past 3 yrs' : 'Last 3 years', sub: 'median, actual', v: s.pastGrowth, cls: 'fill-panel-strong', stroke: true }] : []),
+    ...(s.avg5 != null ? [{ k: compact ? 'FCFF model' : 'FCFF model assumes', sub: compact ? 'assumes' : s.pathName, v: s.avg5, cls: 'fill-accent/40', stroke: true }] : []),
+    ...(s.reverse != null ? [{ k: compact ? 'Price' : 'The price implies', sub: compact ? 'implies' : 'reverse FCFF', v: s.reverse, cls: 'fill-accent', stroke: false }] : []),
   ];
   const max = Math.max(0.05, ...g.map((x) => Math.abs(x.v))) * 1.2;
-  const y = (v: number) => BASE - (Math.max(0, v) / max) * (BASE - TOP - 40);
+  const y = (v: number) => BASE - (Math.max(0, v) / max) * (BASE - TOP - 50);
+  const gap = compact ? 170 : 230;
+  const bw = compact ? 110 : 120;
+  const cxOf = (i: number) => W / 2 + (i - (g.length - 1) / 2) * gap;
   return (
     <g>
       {g.map((b, i) => (
         <g key={b.k}>
-          <rect className={`dcf-bar ${i ? 'fill-accent' : 'fill-panel-strong'}`} x={W / 2 - (compact ? 150 : 170) + i * (compact ? 180 : 220)} y={y(b.v)} width={120} height={BASE - y(b.v)} rx={4} stroke={i ? 'none' : 'var(--seam-color)'} style={{ animationDelay: `${i * 300}ms` }} />
-          <text x={W / 2 - (compact ? 90 : 110) + i * (compact ? 180 : 220)} y={y(b.v) - 14} textAnchor="middle" className={`fill-ink font-mono ${big}`}>
+          <rect className={`dcf-bar ${b.cls}`} x={cxOf(i) - bw / 2} y={y(b.v)} width={bw} height={Math.max(2, BASE - y(b.v))} rx={4} stroke={b.stroke ? 'var(--seam-color)' : 'none'} style={{ animationDelay: `${i * 350}ms` }} />
+          <text x={cxOf(i)} y={y(b.v) - 14} textAnchor="middle" className={`fill-ink font-mono ${big} fade-up`} style={{ animationDelay: `${300 + i * 350}ms` }}>
             {pct(b.v)}
           </text>
-          <text x={W / 2 - (compact ? 90 : 110) + i * (compact ? 180 : 220)} y={BASE + 22} textAnchor="middle" className={label}>
+          <text x={cxOf(i)} y={BASE + 22} textAnchor="middle" className={`fill-ink font-mono ${compact ? 'text-[16px]' : 'text-[12px]'}`}>
             {b.k}
+          </text>
+          <text x={cxOf(i)} y={BASE + (compact ? 42 : 38)} textAnchor="middle" className={label}>
+            {b.sub}
           </text>
         </g>
       ))}
       <text x={W / 2} y={TOP} textAnchor="middle" className={label}>
-        revenue growth a year, years 1–5
+        average revenue growth a year, years 1–5
       </text>
     </g>
+  );
+}
+
+/** One sentence on how the other models compare with FCFF: agreement is reassuring, a wide spread is information. */
+function ModelSpread({ s }: { s: Story }) {
+  const others = s.models.slice(1);
+  const vs = others.map((m) => m.v);
+  const lo = Math.min(...vs);
+  const hi = Math.max(...vs);
+  const above = s.price != null ? s.models.filter((m) => m.v >= s.price!).length : null;
+  return (
+    <>
+      {' '}
+      The other {others.length} models land between {fmt(lo, 'usd')} and {fmt(hi, 'usd')}
+      {above != null ? `; ${above} of ${s.models.length} ${above === 1 ? 'is' : 'are'} above the price` : ''}.
+    </>
   );
 }
 
@@ -569,7 +711,7 @@ function Caption({ s, step, reduced }: { s: Story; step: number; reduced: boolea
     case 2:
       return (
         <>
-          Revenue grows {pct(s.g1)} a year for five years, then slows to {pct(s.gT)}. These are the cash flows the business should produce.
+          Growth starts from last year&apos;s {pct(s.g1)} and fades as fast growers&apos; growth usually does, averaging {pct(s.avg5)} over five years and reaching {pct(s.gT)} by year 10 ({s.pathName}). These are the cash flows the business should produce.
         </>
       );
     case 3:
@@ -589,14 +731,16 @@ function Caption({ s, step, reduced }: { s: Story; step: number; reduced: boolea
     case 6:
       return (
         <>
-          Split across {s.shares.toLocaleString('en-US', { maximumFractionDigits: 0 })}M shares, that is <CountUp to={s.perShare} reduced={reduced} format={(x) => fmt(x, 'usd')} /> a share
-          {gap != null ? `, ${Math.abs(gap * 100).toFixed(0)}% ${gap >= 0 ? 'above' : 'below'} the ${fmt(s.price, 'usd')} price.` : '.'}
+          Split across {s.shares.toLocaleString('en-US', { maximumFractionDigits: 0 })}M shares, FCFF gives <CountUp to={s.perShare} reduced={reduced} format={(x) => fmt(x, 'usd')} /> a share
+          {gap != null ? `, ${Math.abs(gap * 100).toFixed(0)}% ${gap >= 0 ? 'above' : 'below'} the ${fmt(s.price, 'usd')} price` : ''}.
+          {s.models.length > 1 && <ModelSpread s={s} />}
         </>
       );
     default:
       return s.reverse != null ? (
         <>
-          To be worth today&apos;s price, revenue would have to grow {pct(s.reverse)} a year for five years, against {pct(s.g1)} in this model. The question is which you believe.
+          Keeping everything else in the FCFF model fixed, today&apos;s price needs revenue to grow {pct(s.reverse)} a year on average for five years. The model assumes {pct(s.avg5)} on the {s.pathName}
+          {s.pastGrowth != null ? `; the last three years ran at ${pct(s.pastGrowth)}` : ''}. The question is which you believe.
         </>
       ) : (
         <>No growth rate in a sensible range matches the price under these assumptions, which itself says the market sees this business differently.</>

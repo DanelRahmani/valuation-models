@@ -123,7 +123,7 @@ export function Uncertainty({
             <caption className="mb-2 text-left font-sans text-sm text-ink">What is drawn</caption>
             <tbody>
               {[
-                [financial ? 'Book growth, years 1–5' : 'Revenue growth, years 1–5', `${pct(params.g1.mean)} ± ${pct(params.g1.sd)}`, 'normal, spread of 5-yr average growth'],
+                [financial ? 'Book growth, years 1–5' : 'Revenue growth, latest year', `${pct(params.g1.mean)} ± ${pct(params.g1.sd)}`, financial ? 'normal, spread of 5-yr average growth' : 'normal, spread of yearly growth; fades as the growth path says'],
                 ...(params.margin ? [['Target margin', `${pct(params.margin.mean)} ± ${pct(params.margin.sd)}`, 'normal, spread from 10-yr margins']] : []),
                 ...(params.roe ? [['Return on equity', `${pct(params.roe.mean)} ± ${pct(params.roe.sd)}`, 'normal, spread from 10-yr ROE']] : []),
                 ['Beta', `${params.beta.mean.toFixed(2)} ± ${params.beta.sd.toFixed(2)}`, inputs.betaSe != null ? 'normal, regression standard error' : 'normal, fixed ±0.15 (no regression used)'],

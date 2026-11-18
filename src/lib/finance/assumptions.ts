@@ -30,7 +30,20 @@ export interface Assumptions {
   ni0: number | null;
   dps0: number | null;
   payout: number;
+  /** Share of earnings returned to shareholders as dividends plus buybacks, net of stock-based pay (3-yr pooled, 0-1). */
+  totalPayout: number | null;
+  /** True when no capital spending was found in the filings and capex was set equal to D&A. */
+  capexMissing?: boolean;
   hHalfLife: number;
+  /** Growth path calibration (scripts/calibrate-growth.ts): typical nominal growth, the share of a company's excess growth
+   * left next year, and the share that lasts for years. */
+  gTypical?: number;
+  gFade?: number;
+  gKeep?: number;
+  /** How growth above typical fades: 'research' (McKinsey's decay, the default) or 'base' (backtested on this site's data). */
+  growthMode?: GrowthMode;
+  /** Research mode: share of growth above typical that carries into each next year. */
+  gDecay?: number;
   /** Peer multiples, plus the peers' operating margin that their EV/Sales goes with. */
   peers: { pe: number | null; evEbitda: number | null; evSales: number | null; pb: number | null; peg: number | null; margin?: number | null; roe?: number | null };
   aiMode: boolean;
@@ -60,6 +73,40 @@ function avgRatio(h: Historicals, num: LineItem, den: LineItem, n = 3): number |
   const r = a.map((x, i) => x / b[i]).filter((x) => Number.isFinite(x));
   return r.length ? r.reduce((x, y) => x + y, 0) / r.length : null;
 }
+
+/** Sum of the numerator over sum of the denominator across the last n years: one bad year cannot swing it the way an average of yearly ratios can. */
+function pooledRatio(h: Historicals, num: LineItem, den: LineItem, n = 3): number | null {
+  const a = lastN(h, num, n);
+  const b = lastN(h, den, n);
+  let sa = 0;
+  let sb = 0;
+  a.forEach((x, i) => {
+    if (Number.isFinite(x) && Number.isFinite(b[i])) {
+      sa += Math.abs(x);
+      sb += b[i];
+    }
+  });
+  return sb > 0 ? sa / sb : null;
+}
+
+/**
+ * Revenue growth path, estimated from the site's own data (449 non-financial S&P 500 companies, growth 2017-2025) by
+ * scripts/calibrate-growth.ts: year-ahead excess growth over the yearly median regressed on this year's.
+ * - typical: median nominal revenue growth across companies and years.
+ * - fade: share of this year's excess growth still there next year (0.23 all years, 0.33 without 2020-22).
+ * - keep: share still there four to five years later (0.15-0.27): some companies are structural growers.
+ */
+export const GROWTH_CAL = { typical: 0.06, fade: 0.3, keep: 0.2 } as const;
+
+/**
+ * Research default: McKinsey's Valuation (Koller, Goedhart and Wessels) finds companies growing above 20% a year
+ * typically slow to about 8% within five years and about 5% within ten. Growth above typical that keeps 70% each year
+ * (half the gap closes every two years) reproduces that path; Chan, Karceski and Lakonishok (2003) find growth has
+ * little persistence in general.
+ */
+export const GROWTH_RESEARCH = { typical: 0.06, decay: 0.7 } as const;
+
+export type GrowthMode = 'research' | 'base';
 
 /** Below this R², stock returns say too little about market risk and the industry beta is used instead. */
 export const MIN_BETA_R2 = 0.2;
@@ -205,25 +252,51 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
     .sort((x, y) => x - y);
   const cagr = yoy.length ? yoy[Math.floor(yoy.length / 2)] : null;
   void r0;
-  const g1 = cagr != null ? clamp(cagr, -0.1, 0.2) : 0.05;
+  // The forecast starts from the latest year's revenue growth and fades it as S&P 500 companies' growth has actually
+  // faded (GROWTH_CAL), so a boom is respected without being projected forward and no growth cap is needed. The median
+  // of the last three years stands in when the latest year is missing. The wide bounds only stop data errors.
+  const lastTwo = revs.slice(-2);
+  const latestG =
+    lastTwo.length === 2 && lastTwo[0] && lastTwo[1] && lastTwo[0].value > 0 ? lastTwo[1].value / lastTwo[0].value - 1 : null;
+  const gStart = latestG ?? cagr;
+  const g1 = gStart != null ? clamp(gStart, -0.5, 1.5) : 0.05;
   src.g1 =
-    cagr == null
+    gStart == null
       ? 'Default 5%'
-      : `Median revenue growth of the last ${yoy.length} years${cagr > 0.2 ? ` (${(cagr * 100).toFixed(0)}%), capped at 20%: few large companies sustain more for five years` : cagr < -0.1 ? `, floored at -10%` : ''}`;
+      : `${latestG != null ? `FY${fy} revenue growth` : `Median revenue growth of the last ${yoy.length} years`}; the forecast fades it as S&P 500 growth has faded`;
   const gT = Math.min(0.025, rf);
   src.gT = 'Long-run nominal growth, capped at the risk-free rate';
 
   const daPct = avgRatio(h, 'da', 'revenue') ?? 0.04;
-  const capexPct = avgRatio(h, 'capex', 'revenue') ?? 0.05;
+  // No capex tag (common for utilities and REITs, which report spending under company-specific tags): assume the company
+  // spends what it depreciates, the least a business must spend to keep its assets. A flat 5% would flatter
+  // capital-heavy firms whose depreciation alone is a quarter of revenue.
+  const capexAvg = avgRatio(h, 'capex', 'revenue');
+  const capexMissing = capexAvg == null;
+  const capexPct = capexAvg ?? daPct;
   src.daPct = '3-yr average';
-  src.capexPct = '3-yr average';
+  src.capexPct = capexMissing ? 'Not tagged in the SEC data: assumed equal to D&A' : '3-yr average';
   src.nwcPct = 'Default: 10% of each new dollar of revenue';
 
   const div = latest(h, 'dividendsPaid');
   const dps0 = div != null && shares ? div / M / shares : null;
   src.dps0 = div != null ? `${tagOf('dividendsPaid')} / shares` : 'No dividends reported';
-  const payout = clamp(avgRatio(h, 'dividendsPaid', 'netIncome') ?? 0, 0, 1);
-  src.payout = '3-yr dividends / net income';
+  const payout = clamp(pooledRatio(h, 'dividendsPaid', 'netIncome') ?? 0, 0, 1);
+  src.payout = '3-yr dividends / 3-yr net income';
+  // Total payout: what shareholders actually receive. Buybacks that only soak up shares issued as employee pay return
+  // nothing, so stock-based compensation is netted out. Pooled over three years because buybacks are lumpy.
+  const z = (x: number) => (Number.isFinite(x) ? Math.abs(x) : 0);
+  const [tpDiv, tpBuy, tpSbc, tpNi] = (['dividendsPaid', 'buybacks', 'sbc', 'netIncome'] as LineItem[]).map((k) => lastN(h, k));
+  const niSum = tpNi.reduce((s, x) => s + (Number.isFinite(x) ? x : 0), 0);
+  const paid = tpNi.reduce((s, _, i) => s + z(tpDiv[i]) + z(tpBuy[i]) - z(tpSbc[i]), 0);
+  // Capped at 100% of earnings, except that it never falls below the dividends actually paid: REITs and some utilities
+  // pay out more than accounting earnings because depreciation is non-cash, and that payout is real.
+  const divSum = tpNi.reduce((s, _, i) => s + z(tpDiv[i]), 0);
+  const totalPayout = niSum > 0 ? Math.max(clamp(paid / niSum, 0, 1), divSum / niSum) : null;
+  src.totalPayout =
+    niSum > 0 && divSum / niSum > 1
+      ? '3-yr dividends / net income: dividends exceed accounting earnings'
+      : '3-yr (dividends + buybacks - stock-based pay) / net income, capped at 100%';
 
   const ebitda = ebit != null ? ebit + (latest(h, 'da') ?? 0) : null;
   src.exitMultiple = 'Default 12x EBITDA';
@@ -275,7 +348,14 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
     ni0: ni != null ? ni / M : null,
     dps0,
     payout,
+    totalPayout,
+    capexMissing,
     hHalfLife: 5,
+    gTypical: GROWTH_CAL.typical,
+    gFade: GROWTH_CAL.fade,
+    gKeep: GROWTH_CAL.keep,
+    growthMode: 'research',
+    gDecay: GROWTH_RESEARCH.decay,
     peers: { pe: null, evEbitda: null, evSales: null, pb: null, peg: null },
     aiMode: false,
     newShares: 0,
@@ -316,6 +396,7 @@ export function inputDefs(a: Assumptions, src: Sources, h: Historicals): InputDe
     I('ni_0', 'Net income, last fiscal year ($M)', a.ni0, 'usdm', 'Company', 'Latest 10-K'),
     I('equity_0', 'Book equity ($M)', a.equity0, 'usdm', 'Company', 'Latest 10-K'),
     I('dps_0', 'Dividend per share, last fiscal year', a.dps0, 'usd', 'Company', src.dps0),
+    I('tp_ratio', 'Total payout ratio (dividends + net buybacks)', a.totalPayout, 'pct', 'Company', src.totalPayout),
     I('tax', 'Tax rate', a.tax, 'pct', 'Cost of capital', src.tax),
     I('beta_l', 'Levered beta', a.beta, 'beta', 'Cost of capital', src.beta),
     I('mcap', 'Market capitalisation ($M)', '=price*shares', 'usdm', 'Cost of capital', 'Price × shares'),
@@ -326,7 +407,23 @@ export function inputDefs(a: Assumptions, src: Sources, h: Historicals): InputDe
     I('wacc', 'WACC', '=(1-w_debt)*re+w_debt*rd*(1-tax)', 'pct', 'Cost of capital', 'E/V × re + D/V × rd × (1 - t)'),
     I('beta_u', 'Unlevered beta (Hamada)', '=beta_l/(1+(1-tax)*de_ratio)', 'beta', 'Cost of capital', 'β / (1 + (1 - t) D/E)'),
     I('ru', 'Unlevered cost of equity', '=rf+beta_u*erp', 'pct', 'Cost of capital', 'rf + βu × ERP'),
-    I('g_stage1', a.financial ? 'Book equity growth, years 1-5' : 'Revenue growth, years 1-5', a.g1, 'pct', 'Forecast', src.g1),
+    I('g_stage1', a.financial ? 'Book equity growth, years 1-5' : 'Revenue growth, latest year (the forecast starts here)', a.g1, 'pct', 'Forecast', src.g1),
+    I('g_typical', 'Typical company growth, year 1', a.gTypical ?? GROWTH_CAL.typical, 'pct', 'Forecast', 'Median S&P 500 revenue growth, 2017-2025; slides to terminal growth by year 10'),
+    ...((a.growthMode ?? 'research') === 'research'
+      ? [
+          I(
+            'g_decay',
+            'Growth path (research): excess growth kept each year',
+            a.gDecay ?? GROWTH_RESEARCH.decay,
+            'pct',
+            'Forecast',
+            'McKinsey, Valuation: growth above 20% typically falls to about 8% within five years and 5% within ten',
+          ),
+        ]
+      : [
+          I('g_fade', 'Growth path (base rates): excess growth left after one year', a.gFade ?? GROWTH_CAL.fade, 'pct', 'Forecast', 'Backtested on S&P 500 revenue, 2017-2025'),
+          I('g_keep', 'Growth path (base rates): excess growth that lasts', a.gKeep ?? GROWTH_CAL.keep, 'pct', 'Forecast', 'Backtested on S&P 500 revenue, 2017-2025: the part still there four to five years on'),
+        ]),
     I('roe', 'Return on equity', a.roe, 'pct', 'Forecast', src.roe),
     I('g_terminal', 'Terminal growth', a.gT, 'pct', 'Forecast', src.gT),
     I('margin_0', 'Operating margin, now', a.margin0, 'pct', 'Forecast', src.margin0),
@@ -351,7 +448,7 @@ export function inputDefs(a: Assumptions, src: Sources, h: Historicals): InputDe
       const sc = a.scenarios[s];
       const name = s[0].toUpperCase() + s.slice(1);
       defs.push(
-        I(`g1_${s}`, `${name}: growth, years 1-5`, sc.g1, 'pct', 'Scenarios', 'You'),
+        I(`g1_${s}`, `${name}: revenue growth, year 1`, sc.g1, 'pct', 'Scenarios', 'You'),
         I(`margin_${s}`, `${name}: target margin`, sc.margin, 'pct', 'Scenarios', 'You'),
         I(`capex_${s}`, `${name}: capex, % of revenue`, sc.capexPct, 'pct', 'Scenarios', 'You'),
         I(`prob_${s}`, `${name}: probability`, sc.prob, 'pct', 'Scenarios', 'You'),

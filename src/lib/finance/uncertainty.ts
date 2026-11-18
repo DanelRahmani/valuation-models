@@ -64,7 +64,7 @@ export function tornadoRanges(i: TornadoInputs, financial: boolean) {
     rows.push({ key: 'g_stage1', label: 'Book growth, yrs 1–5 ±3 pts', short: 'book equity growth', fmt: 'pct', low: i.g1 - 0.03, high: i.g1 + 0.03 });
   } else {
     if (i.wacc != null) rows.push({ key: 'wacc', label: 'WACC ±1 pt', short: 'the discount rate (WACC)', fmt: 'pct', low: i.wacc - 0.01, high: i.wacc + 0.01 });
-    rows.push({ key: 'g_stage1', label: 'Revenue growth, yrs 1–5 ±3 pts', short: 'revenue growth', fmt: 'pct', low: i.g1 - 0.03, high: i.g1 + 0.03 });
+    rows.push({ key: 'g_stage1', label: 'Revenue growth, year 1 ±5 pts', short: 'revenue growth', fmt: 'pct', low: i.g1 - 0.05, high: i.g1 + 0.05 });
     if (i.marginTarget != null) rows.push({ key: 'margin_target', label: 'Target margin ±3 pts', short: 'the target margin', fmt: 'pct', low: i.marginTarget - 0.03, high: i.marginTarget + 0.03 });
     rows.push({ key: 'capex_pct', label: 'Capex, % of revenue ±25%', short: 'capital spending', fmt: 'pct', low: i.capexPct * 0.75, high: i.capexPct * 1.25 });
     rows.push({ key: 'nwc_pct', label: 'Working capital ±5 pts', short: 'working capital', fmt: 'pct', low: Math.max(0, i.nwcPct - 0.05), high: i.nwcPct + 0.05 });
@@ -148,8 +148,11 @@ export function mcParams(h: Historicals, i: TornadoInputs, financial: boolean): 
   const eq = (h.items.equity ?? []).map((v) => v?.value ?? null);
   const roes = ni.map((n, k) => (n != null && eq[k] ? n / eq[k]! : NaN)).filter(Number.isFinite);
   return {
-    // The input is average growth over five years, not one year's growth: its spread is the yearly spread / √5.
-    g1: { mean: i.g1, sd: clamp((sd(growth) ?? 0.08) / Math.sqrt(5), 0.01, 0.08) },
+    // Banks: the input is average book growth over five years, so its spread is the yearly spread / √5. Others: the
+    // input is one year's revenue growth (it fades after that), so its spread is the yearly spread itself.
+    g1: financial
+      ? { mean: i.g1, sd: clamp((sd(growth) ?? 0.08) / Math.sqrt(5), 0.01, 0.08) }
+      : { mean: i.g1, sd: clamp(sd(growth) ?? 0.1, 0.02, 0.25) },
     margin: !financial && i.marginTarget != null ? { mean: i.marginTarget, sd: clamp(sd(margins) ?? 0.03, 0.01, 0.1) } : null,
     roe: financial && i.roe != null ? { mean: i.roe, sd: clamp(sd(roes) ?? 0.03, 0.01, 0.06) } : null,
     beta: { mean: i.beta, sd: i.betaSe != null ? clamp(i.betaSe, 0.05, 0.5) : 0.15 },
@@ -174,7 +177,7 @@ export function simulate(wb: Workbook, p: McParams, n: number, u: () => number, 
     const z1 = normal(u);
     const z2 = p.rho * z1 + Math.sqrt(1 - p.rho * p.rho) * normal(u);
     const o: Record<string, number> = {
-      g_stage1: clamp(p.g1.mean + p.g1.sd * z1, -0.2, 0.5),
+      g_stage1: financial ? clamp(p.g1.mean + p.g1.sd * z1, -0.2, 0.5) : clamp(p.g1.mean + p.g1.sd * z1, -0.5, 1.5),
       beta_l: Math.max(0.1, p.beta.mean + p.beta.sd * normal(u)),
       g_terminal: triangular(u, p.gT.lo, p.gT.mode, p.gT.hi),
     };

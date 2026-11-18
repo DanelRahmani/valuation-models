@@ -21,13 +21,38 @@ interface FcffOpts {
   shares: string;
 }
 
-/** Growth path: stage-1 for years 1-5, then a straight-line fade to terminal growth. */
+/**
+ * Revenue growth path. A typical company's growth (g_typical) slides in a straight line to terminal growth by year 10,
+ * and the company's growth above typical in its latest year (g1 - g_typical) fades on top of it:
+ * - 'research' (default): it keeps g_decay of itself every year, McKinsey's observed decay of high growth;
+ * - 'base': backtested on this site's data (scripts/calibrate-growth.ts): g_fade of it is left in year 1 and a lasting
+ *   share (g_keep) persists for years, both reaching zero by year 10.
+ * A boom is respected but not projected forward, so no growth cap is needed.
+ */
+const fade = (a: Assumptions, g1: string) => (t: number) => {
+  const base = `g_typical+(g_terminal-g_typical)*${((t - 1) / (N - 1)).toFixed(6)}`;
+  if ((a.growthMode ?? 'research') === 'research') return `=${base}+(${g1}-g_typical)*MIN(g_decay,0.99)^${t}`;
+  const phi = 'MAX(0,(g_fade-g_keep)/(1-g_keep))';
+  const w = ((N - t) / (N - 1)).toFixed(6);
+  return `=${base}+(${g1}-g_typical)*${w}*(g_keep+(g_fade-g_keep)*${phi}^${t - 1})`;
+};
+
+/** Book-equity growth path for banks and insurers: stage-1 for years 1-5, then a straight-line fade to terminal growth. */
 const growth = (g1: string) => (t: number) =>
   t <= HIGH ? `=${g1}` : `=${g1}-(${g1}-g_terminal)*${((t - HIGH) / (N - HIGH)).toFixed(4)}`;
 
 export function fcffSheet(a: Assumptions, baseYear: number, o: FcffOpts): SheetDef {
   const rows: RowDef[] = [
-    { key: 'growth', label: 'Revenue growth', fmt: 'pct', cells: each(growth(o.g1)) },
+    {
+      key: 'growth',
+      label: 'Revenue growth',
+      fmt: 'pct',
+      cells: each(fade(a, o.g1)),
+      note:
+        (a.growthMode ?? 'research') === 'research'
+          ? 'Research path: growth above typical keeps a fixed share each year (McKinsey’s observed decay); typical growth slides to terminal growth by year 10.'
+          : 'Base-rate path, backtested on S&P 500 revenue 2017-2025: most growth above typical is gone after a year, a lasting share fades out by year 10.',
+    },
     { key: 'revenue', label: 'Revenue', fmt: 'usdm', cells: [`=rev_0`, ...each((t) => `=@revenue[${t - 1}]*(1+@growth[${t}])`).slice(1)] },
     {
       key: 'margin',
@@ -60,7 +85,7 @@ export function fcffSheet(a: Assumptions, baseYear: number, o: FcffOpts): SheetD
     { key: 'pv_tv', label: 'Present value of terminal value', fmt: 'usdm', cells: atN(`=@tv[${N}]*@df[${N}]`) },
     { key: 'ev', label: 'Enterprise value', fmt: 'usdm', emphasis: true, cells: at0(`=SUM(@pv[1]:@pv[${N}])+@pv_tv[${N}]`) },
     { key: 'tv_share', label: 'Terminal value share of EV', fmt: 'pct', cells: at0(`=@pv_tv[${N}]/@ev[0]`) },
-    { key: 'equity', label: '- Net debt = equity value', fmt: 'usdm', cells: at0('=@ev[0]-net_debt') },
+    { key: 'equity', label: '- Net debt (+ net cash) = equity value', fmt: 'usdm', cells: at0('=@ev[0]-net_debt') },
     { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0(`=@equity[0]/${o.shares}`) },
   ];
   return { id: o.id, name: o.name, title: o.title, columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
@@ -111,7 +136,7 @@ export function apvSheet(baseYear: number): SheetDef {
       note: 'Permanent debt with shields discounted at the cost of debt: PV = t × rd × D / rd = t × D. Expected distress costs are not modelled.',
     },
     { key: 'apv', label: 'Adjusted present value (EV)', fmt: 'usdm', emphasis: true, cells: at0('=@vu[0]+@shield[0]') },
-    { key: 'equity', label: '- Net debt = equity value', fmt: 'usdm', cells: at0('=@apv[0]-net_debt') },
+    { key: 'equity', label: '- Net debt (+ net cash) = equity value', fmt: 'usdm', cells: at0('=@apv[0]-net_debt') },
     { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0('=@equity[0]/shares') },
   ];
   return { id: 'apv', name: 'APV', title: 'Adjusted present value', columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
@@ -197,7 +222,7 @@ export function ddmSheets(): SheetDef[] {
     title: 'Two-stage dividend discount',
     columns: yrs,
     rows: [
-      { key: 'dps', label: 'Dividend per share (grows at stage-1 rate)', fmt: 'usd', cells: ['=dps_0', ...e((t) => `=@dps[${t - 1}]*(1+g_stage1)`).slice(1)] },
+      { key: 'dps', label: 'Dividend per share (grows with the revenue forecast)', fmt: 'usd', cells: ['=dps_0', ...e((t) => `=@dps[${t - 1}]*(1+@FCFF.growth[${t}])`).slice(1)] },
       { key: 'pv', label: 'Present value at cost of equity', fmt: 'usd', cells: e((t) => `=@dps[${t}]/(1+re)^${t}`) },
       {
         key: 'tv',
@@ -217,13 +242,53 @@ export function ddmSheets(): SheetDef[] {
     columns: ['Value'],
     rows: [
       { key: 'stable', label: 'Stable part: D0 × (1 + gL) / (re - gL)', fmt: 'usd', cells: ['=dps_0*(1+g_terminal)/(re-g_terminal)'] },
-      { key: 'extra', label: 'Extra growth: D0 × H × (gS - gL) / (re - gL)', fmt: 'usd', cells: ['=dps_0*h_half_life*(g_stage1-g_terminal)/(re-g_terminal)'] },
+      { key: 'extra', label: 'Extra growth: D0 × H × (gS - gL) / (re - gL)', fmt: 'usd', cells: ['=dps_0*h_half_life*(@FCFF.growth[1]-g_terminal)/(re-g_terminal)'] },
       { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: ['=@stable[0]+@extra[0]'] },
     ],
     result: { row: 'per_share', col: 0 },
     status: 'ok',
   };
   return [gordon, two, h];
+}
+
+/**
+ * Total payout model: the dividend discount model widened to everything shareholders receive. Dividends plus buybacks,
+ * net of stock-based pay, as a share of earnings; earnings grow with the revenue forecast for five years, then at terminal
+ * growth, when the payout rises to what a mature company can afford (1 - g / re). Discounted at the cost of equity and
+ * divided by today's shares, so buybacks are not double counted.
+ */
+export function totalPayoutSheet(): SheetDef {
+  const yrs = [`Now`, ...Array.from({ length: HIGH }, (_, i) => `Year ${i + 1}`)];
+  const e = (f: (t: number) => string) => Array.from({ length: HIGH + 1 }, (_, t) => (t === 0 ? null : f(t)));
+  return {
+    id: 'total_payout',
+    name: 'TotalPayout',
+    title: 'Total payout (dividends + buybacks)',
+    columns: yrs,
+    rows: [
+      { key: 'ni', label: 'Net income (grows with the revenue forecast)', fmt: 'usdm', cells: ['=ni_0', ...e((t) => `=@ni[${t - 1}]*(1+@FCFF.growth[${t}])`).slice(1)] },
+      { key: 'paid', label: 'Paid to shareholders: net income × total payout ratio', fmt: 'usdm', cells: ['=@ni[0]*tp_ratio', ...e((t) => `=@ni[${t}]*tp_ratio`).slice(1)] },
+      { key: 'pv', label: 'Present value at cost of equity', fmt: 'usdm', cells: e((t) => `=@paid[${t}]/(1+re)^${t}`) },
+      {
+        // Once growth slows, a company only needs to retain g / re of earnings to keep growing (at a return equal to its
+        // cost of equity), so the payout rises to 1 - g / re unless it already pays out more.
+        key: 'tv_payout',
+        label: 'Payout after year 5: the higher of today’s and 1 - g / re',
+        fmt: 'pct',
+        cells: Array.from({ length: HIGH + 1 }, (_, t) => (t === HIGH ? '=MAX(tp_ratio,1-g_terminal/re)' : null)),
+      },
+      {
+        key: 'tv',
+        label: 'Terminal value at year 5: net income × (1 + g) × payout / (re - g)',
+        fmt: 'usdm',
+        cells: Array.from({ length: HIGH + 1 }, (_, t) => (t === HIGH ? `=@ni[${HIGH}]*(1+g_terminal)*@tv_payout[${HIGH}]/(re-g_terminal)` : null)),
+      },
+      { key: 'equity', label: 'Equity value', fmt: 'usdm', cells: [`=SUM(@pv[1]:@pv[${HIGH}])+@tv[${HIGH}]/(1+re)^${HIGH}`] },
+      { key: 'per_share', label: 'Value per share = equity value / shares', fmt: 'usd', emphasis: true, cells: ['=@equity[0]/shares'] },
+    ],
+    result: { row: 'per_share', col: 0 },
+    status: 'ok',
+  };
 }
 
 /** Multiples. Rows whose base metric is negative or whose peer multiple is missing are left blank. */
@@ -277,8 +342,12 @@ function pbRow(a: Assumptions): RowDef {
         : scaled && roe != null && roe <= 0
         ? 'Skipped: book value earning a negative return cannot be valued on a peer multiple.'
         : scaled
-          ? 'The peer multiple is scaled by this company’s return on equity over the peers’.'
-          : undefined,
+          ? usable
+            ? 'The peer multiple is scaled by this company’s return on equity over the peers’.'
+            : 'Skipped: needs positive book equity and a peer P/B.'
+          : usable
+            ? undefined
+            : 'Skipped: needs positive book equity and a peer P/B.',
   };
 }
 
@@ -303,23 +372,26 @@ export function multiplesSheet(a: Assumptions, ebitda0: number | null): SheetDef
     pbRow(a),
     {
       key: 'peg',
-      label: 'PEG: EPS × growth (in %) × peer PEG',
+      label: 'PEG: EPS × average growth, years 1-5 (in %) × peer PEG',
       fmt: 'usd',
-      cells: ['=ni_0/shares', '=peg_peer', ok(eps, a.peers.peg) && a.g1 > 0 ? '=@peg[0]*g_stage1*100*@peg[1]' : null],
+      cells: ['=ni_0/shares', '=peg_peer', ok(eps, a.peers.peg) && a.g1 > 0 ? '=@peg[0]*AVERAGE(@FCFF.growth[1],@FCFF.growth[2],@FCFF.growth[3],@FCFF.growth[4],@FCFF.growth[5])*100*@peg[1]' : null],
     },
   ];
   const used = rows.filter((r) => r.cells[2] != null);
+  const skipped = rows.filter((r) => r.cells[2] == null).map((r) => r.label.split(/[:,]/)[0]);
   const implied = used.map((r) => `@${r.key}[2]`);
   rows.push({
     key: 'per_share',
-    label: used.length === 1 ? `Based on one multiple only (${used[0].label.split(':')[0]})` : 'Average of available multiples',
+    label: used.length === 1 ? `Based on one multiple only (${used[0].label.split(':')[0]})` : `Average of ${used.map((r) => r.label.split(/[:,]/)[0]).join(', ')}`,
     fmt: 'usd',
     emphasis: true,
     cells: [null, null, implied.length ? `=AVERAGE(${implied.join(',')})` : null],
     note:
       used.length === 1
         ? 'Only one multiple applies (the others need positive earnings), so treat this as a rough guide rather than a valuation.'
-        : undefined,
+        : skipped.length
+          ? `${skipped.join(', ')} left out of the average (see the note on that row).`
+          : undefined,
   });
   return {
     id: 'multiples',

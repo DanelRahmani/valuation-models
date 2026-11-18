@@ -89,7 +89,9 @@ export function Peers({ ticker, onUseMultiples, usingPeers }: { ticker: string; 
                   <td className="num py-2 text-right" title={r.k === 'roic' && me?.roicNm ? 'Not meaningful: cash or negative equity leaves almost no invested capital' : undefined}>
                     {r.k === 'roic' && me?.roicNm ? 'n/m' : r.f(mine)}
                   </td>
-                  <td className="num py-2 text-right text-muted">{r.f(median(vals))}</td>
+                  <td className="num py-2 text-right text-muted">
+                    {r.f(r.k === 'pe' || r.k === 'evEbitda' || r.k === 'pb' ? multiples[r.k] : median(vals))}
+                  </td>
                   <td className="py-2 pl-6">
                     <Strip mine={mine} vals={vals} label={`${r.label}: ${ticker} ranks ${rankText(percentile(mine, vals))}`} />
                   </td>
@@ -113,6 +115,7 @@ export function Peers({ ticker, onUseMultiples, usingPeers }: { ticker: string; 
           Median P/E {times(multiples.pe)} · EV/EBITDA {times(multiples.evEbitda)} · EV/Sales {times(multiples.evSales)} · P/B {times(multiples.pb)}
         </span>
       </div>
+      <p className="mt-3 text-xs text-muted">Peer multiples leave out negative values and outliers (P/E or EV/EBITDA above 100×, P/B or EV/Sales above 50×).</p>
       <p className="mt-4 text-xs text-muted">
         Peers:{' '}
         {peers.map((c, i) => (
