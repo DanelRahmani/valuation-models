@@ -149,12 +149,17 @@ export default function Methodology() {
             figure on a valuation page to see the tag, period and filing date behind it.
           </p>
           <p className="mt-4">
-            <strong>Trailing twelve months.</strong> A 10-K can be up to 14 months old by the time the next one is filed, which matters for fast growers:
-            Palantir&apos;s P/E on its 2025 10-K was about 250x, against about 110x on its latest twelve months. So the forecast starts from the last twelve
-            months by default: the last fiscal year, plus the year to date in the latest 10-Q, minus the same period a year earlier (each 10-Q reports both).
-            Cash, debt and book equity come from the latest 10-Q balance sheet. Every annual rule (debt recipes, rebuilt operating income, D&amp;A plus
-            amortisation) runs on the trailing period too. The averages that need comparable periods (tax rate, capex and D&amp;A ratios, payout ratios) and
-            the ten-year history stay on fiscal years. A switch at the top of each valuation page goes back to the last fiscal year alone.
+            <strong>TTM by default, 10-K on request.</strong> A 10-K can be up to 14 months old by the time the next one is filed, which matters for
+            fast growers: Palantir&apos;s P/E on its 2025 10-K was about 250x, against about 110x on its trailing twelve months. So every valuation starts
+            from the trailing twelve months (TTM), the basis Yahoo Finance, Bloomberg and analysts quote: the last fiscal year, plus the year to date in the
+            latest 10-Q, minus the same period a year earlier (each 10-Q reports both). Cash, debt and book equity come from the latest 10-Q balance sheet.
+            Every annual rule (debt recipes, rebuilt operating income, D&amp;A plus amortisation) runs on the trailing period too. The averages that need
+            comparable periods (tax rate, capex and D&amp;A ratios, payout ratios) and the ten-year history stay on fiscal years.
+          </p>
+          <p className="mt-4">
+            The <em>Figures</em> switch at the top of each valuation page moves every model to the last fiscal year as reported in the audited 10-K
+            (shareable links keep the choice). The header always names the basis: &ldquo;TTM to&nbsp;&hellip;&rdquo; or &ldquo;FY&hellip; 10-K&rdquo;.
+            Where the latest filing is the 10-K itself, there is no newer quarter, TTM and the fiscal year are the same, and the page says so.
           </p>
           <ul className="mt-4 list-disc space-y-2 pl-5">
             <li>
@@ -433,7 +438,8 @@ export default function Methodology() {
           <ul className="mt-4 list-disc space-y-2 pl-5">
             <li>
               Trailing twelve months need the 10-Q data in SEC company facts; when a company files late, changes its fiscal year or tags its 10-Q
-              differently from its 10-K, the page falls back to the last fiscal year and says so in the header.
+              differently from its 10-K, the page falls back to the last fiscal year and says so under the Figures switch. Lines a 10-Q does not tag (debt or D&amp;A at a few
+              filers) keep their 10-K value.
             </li>
             <li>Leases, pensions, minority interests and options are not adjusted for separately.</li>
             <li>

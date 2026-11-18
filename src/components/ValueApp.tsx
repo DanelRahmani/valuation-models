@@ -289,35 +289,42 @@ function Valuation({ ticker, h, company, market }: Loaded) {
           <div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <Label>
-                {ticker ? `${ticker} · ` : ''}CIK {h.cik} · {a.basis === 'ttm' && h.ttm ? `12 months to ${fmtDate(h.ttm.end)}` : `FY${h.years.at(-1)} 10-K`}
+                {ticker ? `${ticker} · ` : ''}CIK {h.cik} · {a.basis === 'ttm' && h.ttm ? `TTM to ${fmtDate(h.ttm.end)} (10-K + 10-Q)` : `FY${h.years.at(-1)} 10-K`}
                 {company ? ` · ${company.sector}` : ''}
               </Label>
               <QaBadge ticker={ticker} />
             </div>
-            {h.ttm && (
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-muted">Start the forecast from</span>
-                <div role="group" aria-label="Starting period" className="inline-flex rounded-full border border-seam p-0.5">
+            <div className="mt-3 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-muted">Figures:</span>
+                <div role="group" aria-label="Basis of the figures" className="inline-flex rounded-full border border-seam p-0.5">
                   {(
                     [
-                      ['ttm', `Last 12 months to ${fmtDate(h.ttm.end)}`, 'Last fiscal year (10-K) rolled forward with the 10-Qs filed since: fiscal year + year to date - the same period a year earlier'],
-                      ['fy', `Fiscal year ${h.years.at(-1)} (10-K)`, 'The audited annual report only'],
+                      ['ttm', 'TTM · trailing 12 months (default)'],
+                      ['fy', `10-K · fiscal year ${h.years.at(-1)}`],
                     ] as const
-                  ).map(([b, label, title]) => (
+                  ).map(([b, label]) => (
                     <button
                       key={b}
                       type="button"
-                      title={title}
                       aria-pressed={a.basis === b}
+                      disabled={b === 'ttm' && !h.ttm}
                       onClick={() => a.basis !== b && switchBasis(b)}
-                      className={`rounded-full px-3 py-1 transition-colors ${a.basis === b ? 'bg-accent text-bg' : 'text-muted hover:text-ink'}`}
+                      className={`rounded-full px-3 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${a.basis === b ? 'bg-accent text-bg' : 'text-muted hover:text-ink'}`}
                     >
                       {label}
                     </button>
                   ))}
                 </div>
               </div>
-            )}
+              <p className="mt-1.5 max-w-xl text-muted">
+                {!h.ttm
+                  ? `The latest filing is the FY${h.years.at(-1)} 10-K: there is no newer quarter yet, so the figures are the fiscal year.`
+                  : a.basis === 'ttm'
+                    ? `Trailing twelve months to ${fmtDate(h.ttm.end)}: the FY${h.years.at(-1)} 10-K plus the 10-Q year to date, minus the same period a year earlier, with balances from the 10-Q. This is how Yahoo Finance and Bloomberg report.`
+                    : `Fiscal year ${h.years.at(-1)} as reported in the audited 10-K, ending ${fmtDate(h.yearEnds.at(-1)!)}. Newer quarters are left out.`}
+              </p>
+            </div>
             <h1 className="mt-4 font-serif text-5xl italic leading-[1.02] sm:text-6xl">{prettyName(h.name)}</h1>
             <div aria-hidden className="mt-5 h-px w-40 bg-accent/70" />
             <dl className="mt-8 flex flex-wrap gap-3">
