@@ -3,6 +3,9 @@
   "APA": {
     "missing-core": "APA tags revenue only by product (oil, gas, NGL) with dimensions; the company-level revenue total is not in SEC company facts."
   },
+  "FOX": {
+    "market-cap": "Nasdaq's market caps for Fox's two share classes (FOX and FOXA) imply about 570M shares; Fox has about 430M Class A and Class B shares combined (diluted weighted shares in its 10-Q), so the Nasdaq figure is off, not the share count. FOXA sits just under the 25% limit and may need the same entry."
+  },
   "LHX": {
     "missing-core": "L3Harris tagged full-year FY2025 revenue ($21.9B) with a start date of 2025-10-04, so it reads as a quarter."
   }

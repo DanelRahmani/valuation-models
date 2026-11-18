@@ -512,7 +512,8 @@ export function extractTtm(t: TrimmedFacts, yearEnds: string[], annual: Historic
     const out: Partial<Record<LineItem, FactValue | null>> = {};
     for (const k of Object.keys(TAG_MAP) as LineItem[]) {
       const v = h.items[k]?.[i];
-      out[k] = v ? { ...v, tag: `${v.tag}, last 12 months (10-K + 10-Q year to date - same period a year earlier)` } : null;
+      const how = INSTANT.has(k) ? `10-Q balance sheet, ${v?.end}` : 'last 12 months (10-K + 10-Q year to date - same period a year earlier)';
+      out[k] = v ? { ...v, tag: `${v.tag}, ${how}` } : null;
     }
     return out;
   };
@@ -521,6 +522,8 @@ export function extractTtm(t: TrimmedFacts, yearEnds: string[], annual: Historic
   const rev = items.revenue?.value;
   const revFy = annual.revenue?.at(-1)?.value;
   if (rev != null && revFy && (rev / revFy < 0.4 || rev / revFy > 2.5)) return null;
+  // The headline lines must all roll forward, or the trailing period would mix windows: fall back to the fiscal year.
+  for (const k of ['revenue', 'netIncome', 'operatingIncome'] as LineItem[]) if (annual[k]?.at(-1) != null && items[k] == null) return null;
   if (items.revenue == null && items.netIncome == null) return null;
   return { start: nextDay(shiftYears(end, -1)), end, fyEnd, items, prior };
 }
@@ -539,6 +542,10 @@ export function current(h: Historicals, item: LineItem, basis: Basis = 'ttm'): n
 }
 
 export function currentFact(h: Historicals, item: LineItem, basis: Basis = 'ttm'): FactValue | null {
-  if (basis === 'ttm' && h.ttm) return h.ttm.items[item] ?? null;
-  return h.items[item]?.at(-1) ?? null;
+  const fy = h.items[item]?.at(-1) ?? null;
+  if (basis !== 'ttm' || !h.ttm) return fy;
+  // A line the 10-Qs do not tag (debt under a recipe only the 10-K uses, D&A at some filers) keeps its 10-K value
+  // rather than reading as zero.
+  const t = h.ttm.items[item];
+  return t ?? (fy ? { ...fy, tag: `${fy.tag} (latest 10-K: not tagged in the 10-Qs)` } : null);
 }

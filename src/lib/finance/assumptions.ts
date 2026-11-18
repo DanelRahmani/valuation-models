@@ -175,7 +175,7 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext, basisWant
   const cover = h.latestShares?.value ?? latest(h, 'sharesOutstanding');
   const diluted = cur('dilutedShares');
   let sharesRaw = cover;
-  src.shares = h.latestShares ? `Cover page of the ${h.latestShares.tag.includes('10-Q') ? '10-Q' : '10-K'} dated ${h.latestShares.end}` : `${tagOf('sharesOutstanding')}, latest 10-K`;
+  src.shares = h.latestShares ? `Cover page of the ${h.latestShares.tag.includes('10-Q') ? '10-Q' : '10-K'} dated ${h.latestShares.end}` : `${h.items.sharesOutstanding?.at(-1)?.tag}, latest 10-K`;
   if (diluted != null && (cover == null || cover < 0.6 * diluted)) {
     sharesRaw = diluted;
     src.shares = cover == null ? `Diluted weighted shares, ${filing}` : `Diluted weighted shares, ${filing} (the cover page lists only one share class)`;
