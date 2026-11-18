@@ -492,7 +492,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
       </div>
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="pt-10">
         {tab === 'models' && (
-      <div className="grid gap-12 lg:grid-cols-[340px_1fr]">
+      <div className="grid gap-12 lg:grid-cols-[340px_minmax(0,1fr)]">
         <aside className="lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:pr-2">
           <h2 className="font-serif text-2xl">Assumptions</h2>
           <p className="mt-1 text-xs text-muted">Every field shows where its value came from. Change anything; the models update as you type.</p>
@@ -716,7 +716,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
           </Group>
         </aside>
 
-        <div>
+        <div className="min-w-0">
           {order.map((id) => {
             const r = byId(id);
             if (!r) return null;
