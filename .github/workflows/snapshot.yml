@@ -44,6 +44,8 @@ jobs:
           fi
 
       - name: Test the new data
+        env:
+          DATA_CHECKS_MODE: snapshot # stale data exceptions warn instead of failing; see tests/data-checks.test.ts
         run: |
           npx tsc --noEmit
           npx vitest run
@@ -72,6 +74,28 @@ jobs:
           else
             git commit -m "data: monthly snapshot $(date -u +%Y-%m-%d)"
             git push
+          fi
+
+      - name: Report companies held back and stale exceptions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node -e '
+            const q = require("./public/data/qa.json");
+            const held = Object.entries(q.heldBack ?? {});
+            const stale = q.staleExceptions ?? [];
+            if (!held.length && !stale.length) process.exit(0);
+            const lines = ["The data was published. These need a look; nothing is blocked.", ""];
+            if (held.length) {
+              lines.push("**Held back** (new data failed a check, so the company keeps last month'"'"'s file or, if new to the index, is left out). Fix the extraction, or add the filing problem to `tests/data-exceptions.json`:", "");
+              for (const [t, why] of held) lines.push(`- ${t}: ${why.join("; ")}`);
+              lines.push("");
+            }
+            if (stale.length) lines.push("**Stale exceptions** (the filing problem is gone; remove from `tests/data-exceptions.json`): " + stale.join(", "), "");
+            require("fs").writeFileSync("issue.md", lines.join("\n"));
+          '
+          if [ -f issue.md ]; then
+            gh issue create --title "Monthly data snapshot: companies to check ($(date -u +%Y-%m-%d))" --body-file issue.md
           fi
 
       - name: Keep the schedule alive

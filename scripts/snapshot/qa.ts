@@ -26,6 +26,10 @@ export interface QaFile {
   companies: Record<string, CheckIssue[]>;
   /** Per company: relative gap to Nasdaq for each compared item (0.01 = 1%), for the data-quality badge. */
   reference: Record<string, Partial<Record<'revenue' | 'netIncome' | 'equity', number>>>;
+  /** Companies whose new data failed a check this run: they keep last month's file. Ticker -> the failing checks. */
+  heldBack?: Record<string, string[]>;
+  /** Entries in tests/data-exceptions.json that no longer occur and can be removed. */
+  staleExceptions?: string[];
 }
 
 /** Thresholds below which the snapshot is not published. Measured Nov 2026: revenue 97%, net income 96%, equity 99%. */

@@ -209,7 +209,8 @@ async function main() {
       await S.sleep(250);
     }
   }
-  const qa = runQa(results, market, refs, loadExceptions());
+  const exceptions = loadExceptions();
+  let qa = runQa(results, market, refs, exceptions);
   const q = qa.summary;
   log(
     `Checks: ${q.errors} errors (${q.unexplainedErrors} unexplained), ${q.warnings} warnings. Within 2% of Nasdaq: revenue ${(q.reference.revenue.rate * 100).toFixed(0)}%, net income ${(q.reference.netIncome.rate * 100).toFixed(0)}%, equity ${(q.reference.equity.rate * 100).toFixed(0)}% (no reference for ${q.referenceUnavailable}).`,
@@ -219,6 +220,30 @@ async function main() {
     writeFileSync(join(tmpdir(), 'qa-failed.json'), JSON.stringify(qa, null, 1));
     throw new Error(`Data checks failed, nothing written:\n- ${gate.join('\n- ')}`);
   }
+
+  /* 7. One company's odd filing must not hold back the other 500. A company with an error that tests/data-exceptions.json
+   * does not explain keeps last month's file (or, new to the index, is left out) and is reported, not published. */
+  const heldBack: Record<string, string[]> = {};
+  for (let i = results.length - 1; i >= 0; i--) {
+    const r = results[i];
+    const bad = (qa.companies[r.ticker] ?? []).filter((x) => x.severity === 'error' && !exceptions[r.ticker]?.[x.id]);
+    if (!bad.length) continue;
+    heldBack[r.ticker] = bad.map((x) => `[${x.id}] ${x.message}`);
+    const prev = readJson<CompanyFile>(fileFor(r.ticker));
+    if (prev) results[i] = prev;
+    else results.splice(i, 1);
+    log('HOLD', r.ticker, prev ? 'keeps last month' : 'left out (no earlier file)', '-', heldBack[r.ticker].join('; '));
+  }
+  if (Object.keys(heldBack).length) qa = runQa(results, market, refs, exceptions);
+  // Exceptions that no longer occur: fixed filings. Reported so the list can be pruned; they do not block the update.
+  const staleExceptions = Object.entries(exceptions)
+    .filter(([t]) => !t.startsWith('_') && results.some((r) => r.ticker === t))
+    .flatMap(([t, ids]) =>
+      Object.keys(ids)
+        .filter((id) => !ids[id].startsWith('Intermittent:') && !(qa.companies[t] ?? []).some((x) => x.id === id && x.severity === 'error'))
+        .map((id) => `${t} [${id}]`),
+    );
+  qa = { ...qa, heldBack, staleExceptions };
 
   for (const r of results) writeFileSync(fileFor(r.ticker), JSON.stringify(r));
   writeFileSync(join(OUT, 'qa.json'), JSON.stringify(qa));
