@@ -432,7 +432,11 @@ export function extractHistoricals(raw: unknown, nYears = 10): Historicals {
   );
 
   const yearEndList = years.map((y) => yearEnds.get(y)!);
-  return { cik: t.cik, name: t.name, years, yearEnds: yearEndList, items, missing, latestShares, ttm: extractTtm(t, yearEndList, items) };
+  const ttm = extractTtm(t, yearEndList, items);
+  const fyEnd2 = yearEndList.at(-1);
+  const qEnd = !ttm && fyEnd2 ? latestQuarterEnd(t, fyEnd2) : null;
+  const ttmSkipped = qEnd && fyEnd2 ? ttmBasisProblem(t, fyEnd2, qEnd) : null;
+  return { cik: t.cik, name: t.name, years, yearEnds: yearEndList, items, missing, latestShares, ttm, ttmSkipped };
 }
 
 const near = (a: string, b: string, tol = 10) => Math.abs(days(a, b)) <= tol;
@@ -487,15 +491,50 @@ const TTM_ANCHORS = [...TAG_MAP.revenue, ...TAG_MAP.netIncome, ...TAG_MAP.cfo];
  * filing is the 10-K itself, when the 10-Q data needed is missing (older trimmed files, unusual fiscal calendars), or
  * when the result looks like a data error (revenue under 40% or over 250% of the last fiscal year).
  */
-export function extractTtm(t: TrimmedFacts, yearEnds: string[], annual: Historicals['items']): Historicals['ttm'] {
-  const fyEnd = yearEnds.at(-1);
-  if (!fyEnd) return null;
+/** End of the latest 10-Q year-to-date period after the fiscal year ending `fyEnd`, or null. */
+function latestQuarterEnd(t: TrimmedFacts, fyEnd: string): string | null {
   let end: string | null = null;
   for (const tag of TTM_ANCHORS) {
     const q = (t.tags[tag] ?? []).filter((r) => r.form.startsWith('10-Q') && r.start && near(r.start, nextDay(fyEnd)) && r.end > fyEnd);
     for (const r of q) if (!end || r.end > end) end = r.end;
   }
-  if (!end) return null;
+  return end;
+}
+
+/**
+ * Rolling a 10-K forward is only sound when the 10-Q reports on the same basis. After a spin-off or sale the 10-Q
+ * restates earlier periods to continuing operations (Honeywell: nine months of 2025 fell from $28B to $15B), and adding
+ * that to the old 10-K would mix two different companies. The test: the share of a fiscal year's revenue earned by the
+ * same quarter date (year-to-date / full year, both for the year ending `fyEnd`) must match the share a year earlier
+ * within 10 points, and lie within half to one and a half times the share of the year elapsed. Returns why it fails.
+ */
+export function ttmBasisProblem(t: TrimmedFacts, fyEnd: string, end: string): string | null {
+  const priorFyEnd = shiftYears(fyEnd, -1);
+  for (const tag of TAG_MAP.revenue) {
+    const rows = t.tags[tag] ?? [];
+    const q = ytdRow(rows, fyEnd, end);
+    if (!q) continue;
+    const annualAt = (e: string) => rows.find((r) => r.form.startsWith('10-K') && r.start && near(r.end, e) && days(r.start, r.end) >= 350);
+    const fy = annualAt(fyEnd);
+    const ytdPrior = ytdRow(rows, priorFyEnd, shiftYears(q.end, -1));
+    if (!fy || !ytdPrior || fy.val <= 0) return null;
+    const elapsed = days(q.start!, q.end) / 365;
+    const share = ytdPrior.val / fy.val;
+    const earlierFy = annualAt(priorFyEnd);
+    const ytdEarlier = ytdRow(rows, shiftYears(priorFyEnd, -1), shiftYears(q.end, -2));
+    const shareEarlier = earlierFy && ytdEarlier && earlierFy.val > 0 ? ytdEarlier.val / earlierFy.val : null;
+    if (share < 0.5 * elapsed || share > 1.5 * elapsed || (shareEarlier != null && Math.abs(share - shareEarlier) > 0.1))
+      return `The 10-Q to ${end} restates earlier periods (a spin-off, sale or change in reporting): its figures for the year before no longer match the 10-K, so the trailing twelve months cannot be built from both.`;
+    return null;
+  }
+  return null;
+}
+
+export function extractTtm(t: TrimmedFacts, yearEnds: string[], annual: Historicals['items']): Historicals['ttm'] {
+  const fyEnd = yearEnds.at(-1);
+  if (!fyEnd) return null;
+  const end = latestQuarterEnd(t, fyEnd);
+  if (!end || ttmBasisProblem(t, fyEnd, end)) return null;
   const synth: Record<string, TrimmedRow[]> = {};
   rollForward(t, fyEnd, end, synth);
   const priorEnd = yearEnds.at(-2);
@@ -503,7 +542,8 @@ export function extractTtm(t: TrimmedFacts, yearEnds: string[], annual: Historic
   if (priorEnd) {
     // The prior-year window ends on that year's quarter date, which can differ by a few days on 52/53-week calendars.
     const priorRow = TTM_ANCHORS.flatMap((tag) => t.tags[tag] ?? []).find((r) => r.form.startsWith('10-Q') && r.start && near(r.start, nextDay(priorEnd)) && near(r.end, priorTtmEnd));
-    if (priorRow) rollForward(t, priorEnd, priorRow.end, synth);
+    // The window a year earlier needs the same basis check; without it, growth falls back to fiscal years.
+    if (priorRow && !ttmBasisProblem(t, priorEnd, priorRow.end)) rollForward(t, priorEnd, priorRow.end, synth);
   }
   for (const rows of Object.values(synth)) rows.sort((a, b) => a.end.localeCompare(b.end));
   const h = extractHistoricals({ cik: t.cik, name: t.name, tags: synth }, 2);

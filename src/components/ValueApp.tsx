@@ -319,7 +319,9 @@ function Valuation({ ticker, h, company, market }: Loaded) {
               </div>
               <p className="mt-1.5 max-w-xl text-muted">
                 {!h.ttm
-                  ? `The latest filing is the FY${h.years.at(-1)} 10-K: there is no newer quarter yet, so the figures are the fiscal year.`
+                  ? h.ttmSkipped
+                    ? `${h.ttmSkipped} The figures stay on the FY${h.years.at(-1)} 10-K.`
+                    : `The latest filing is the FY${h.years.at(-1)} 10-K: there is no newer quarter yet, so the figures are the fiscal year.`
                   : a.basis === 'ttm'
                     ? `Trailing twelve months to ${fmtDate(h.ttm.end)}: the FY${h.years.at(-1)} 10-K plus the 10-Q year to date, minus the same period a year earlier, with balances from the 10-Q. This is how Yahoo Finance and Bloomberg report.`
                     : `Fiscal year ${h.years.at(-1)} as reported in the audited 10-K, ending ${fmtDate(h.yearEnds.at(-1)!)}. Newer quarters are left out.`}
