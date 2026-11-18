@@ -5,7 +5,12 @@ import type { ModelId, RowDef, SheetDef } from './calcsheet';
 export const N = 10;
 export const HIGH = 5;
 
-const cols = (baseYear: number) => [`FY${baseYear}`, ...Array.from({ length: N }, (_, i) => `FY${baseYear + i + 1}`)];
+/** Starting period of the forecast: a fiscal year, or the trailing twelve months (columns then read TTM, Yr 1 ... Yr 10). */
+export type Base = number | 'ttm';
+const cols = (base: Base) =>
+  base === 'ttm'
+    ? ['TTM', ...Array.from({ length: N }, (_, i) => `Yr ${i + 1}`)]
+    : [`FY${base}`, ...Array.from({ length: N }, (_, i) => `FY${base + i + 1}`)];
 const each = (f: (t: number) => string | number | null, from = 1): (string | number | null)[] =>
   Array.from({ length: N + 1 }, (_, t) => (t < from ? null : f(t)));
 const at0 = (v: string | number): (string | number | null)[] => [v];
@@ -41,7 +46,7 @@ const fade = (a: Assumptions, g1: string) => (t: number) => {
 const growth = (g1: string) => (t: number) =>
   t <= HIGH ? `=${g1}` : `=${g1}-(${g1}-g_terminal)*${((t - HIGH) / (N - HIGH)).toFixed(4)}`;
 
-export function fcffSheet(a: Assumptions, baseYear: number, o: FcffOpts): SheetDef {
+export function fcffSheet(a: Assumptions, baseYear: Base, o: FcffOpts): SheetDef {
   const rows: RowDef[] = [
     {
       key: 'growth',
@@ -91,7 +96,7 @@ export function fcffSheet(a: Assumptions, baseYear: number, o: FcffOpts): SheetD
   return { id: o.id, name: o.name, title: o.title, columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
 }
 
-export function fcfeSheet(baseYear: number): SheetDef {
+export function fcfeSheet(baseYear: Base): SheetDef {
   const rows: RowDef[] = [
     { key: 'ebit', label: 'Operating income (from FCFF)', fmt: 'usdm', cells: each((t) => `=@FCFF.ebit[${t}]`) },
     { key: 'interest', label: '- Interest (debt × cost of debt)', fmt: 'usdm', cells: each(() => '=debt*rd') },
@@ -120,7 +125,7 @@ export function fcfeSheet(baseYear: number): SheetDef {
   return { id: 'fcfe', name: 'FCFE', title: 'Free cash flow to equity', columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
 }
 
-export function apvSheet(baseYear: number): SheetDef {
+export function apvSheet(baseYear: Base): SheetDef {
   const rows: RowDef[] = [
     { key: 'fcff', label: 'Free cash flow to the firm (from FCFF)', fmt: 'usdm', cells: each((t) => `=@FCFF.fcff[${t}]`) },
     { key: 'df', label: 'Discount factor at unlevered cost of equity', fmt: 'num', cells: each((t) => `=1/(1+ru)^${t}`) },
@@ -142,7 +147,7 @@ export function apvSheet(baseYear: number): SheetDef {
   return { id: 'apv', name: 'APV', title: 'Adjusted present value', columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
 }
 
-export function riSheet(baseYear: number): SheetDef {
+export function riSheet(baseYear: Base): SheetDef {
   const rows: RowDef[] = [
     { key: 'ni', label: 'Net income (from FCFE)', fmt: 'usdm', cells: each((t) => `=@FCFE.ni[${t}]`) },
     {
@@ -152,14 +157,26 @@ export function riSheet(baseYear: number): SheetDef {
       cells: each((t) => `=@FCFE.fcfe[${t}]`),
       note: 'Clean surplus: book equity grows only by what is reinvested, which keeps this model consistent with FCFE.',
     },
-    { key: 'book', label: 'Book equity, end of year', fmt: 'usdm', cells: ['=equity_0', ...each((t) => `=@book[${t - 1}]+@ni[${t}]-@div[${t}]`).slice(1)] },
+    {
+      key: 'book',
+      label: 'Operating book equity, end of year',
+      fmt: 'usdm',
+      cells: ['=equity_0-cash-sti', ...each((t) => `=@book[${t - 1}]+@ni[${t}]-@div[${t}]`).slice(1)],
+      note: 'Book equity less cash and investments. The forecast earns no interest on cash, so charging the cost of equity on it would value it near zero; it is added back at face value below, as in FCFE.',
+    },
     { key: 'charge', label: 'Equity charge (re × opening book)', fmt: 'usdm', cells: each((t) => `=re*@book[${t - 1}]`) },
     { key: 'ri', label: 'Residual income', fmt: 'usdm', emphasis: true, cells: each((t) => `=@ni[${t}]-@charge[${t}]`) },
     { key: 'df', label: 'Discount factor at cost of equity', fmt: 'num', cells: each((t) => `=1/(1+re)^${t}`) },
     { key: 'pv', label: 'Present value of residual income', fmt: 'usdm', cells: each((t) => `=@ri[${t}]*@df[${t}]`) },
     { key: 'tv', label: 'Terminal value of residual income', fmt: 'usdm', cells: atN(`=@ri[${N}]*(1+g_terminal)/(re-g_terminal)`) },
     { key: 'pv_tv', label: 'Present value of terminal value', fmt: 'usdm', cells: atN(`=@tv[${N}]*@df[${N}]`) },
-    { key: 'equity', label: 'Book equity + PV of residual income', fmt: 'usdm', emphasis: true, cells: at0(`=@book[0]+SUM(@pv[1]:@pv[${N}])+@pv_tv[${N}]`) },
+    {
+      key: 'equity',
+      label: 'Book + PV of residual income + cash and investments',
+      fmt: 'usdm',
+      emphasis: true,
+      cells: at0(`=@book[0]+SUM(@pv[1]:@pv[${N}])+@pv_tv[${N}]+cash+sti`),
+    },
     { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0('=@equity[0]/shares') },
   ];
   return { id: 'ri', name: 'ResidualIncome', title: 'Residual income', columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
@@ -169,7 +186,7 @@ export function riSheet(baseYear: number): SheetDef {
  * Residual income for banks and insurers: book equity is the operating base, so it grows with the growth path and
  * earns the return on equity. Value = book + PV of (ROE - cost of equity) × opening book.
  */
-export function riFinancialSheet(baseYear: number): SheetDef {
+export function riFinancialSheet(baseYear: Base): SheetDef {
   const rows: RowDef[] = [
     { key: 'growth', label: 'Book equity growth', fmt: 'pct', cells: each(growth('g_stage1')) },
     { key: 'book', label: 'Book equity, end of year', fmt: 'usdm', cells: ['=equity_0', ...each((t) => `=@book[${t - 1}]*(1+@growth[${t}])`).slice(1)] },
@@ -409,7 +426,7 @@ export function multiplesSheet(a: Assumptions, ebitda0: number | null): SheetDef
   };
 }
 
-export function scenarioSheets(a: Assumptions, baseYear: number): SheetDef[] {
+export function scenarioSheets(a: Assumptions, baseYear: Base): SheetDef[] {
   const sc = (['bear', 'base', 'bull'] as const).map((s) =>
     fcffSheet(a, baseYear, {
       id: `fcff_${s}` as ModelId,

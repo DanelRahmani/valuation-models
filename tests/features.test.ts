@@ -139,3 +139,64 @@ describe('shareable links', () => {
     expect(s.over.g1).toBeUndefined();
   });
 });
+
+describe('trailing twelve months', () => {
+  // Palantir as filed (docs/ttm-plan.md), in $M: FY2025 10-K plus the 10-Q for the nine months to 30 Sep 2026.
+  // TTM revenue = 4,475 + 5,881 - 3,069 = 7,287 (Nasdaq's sum of four quarters: 7,288).
+  const M = 1e6;
+  const flow = (start: string, end: string, val: number, form: string, filed: string) => ({ start, end, val: val * M, form, filed });
+  const inst = (end: string, val: number, form: string, filed: string) => ({ end, val: val * M, form, filed });
+  const raw = {
+    cik: 1321655,
+    entityName: 'Palantir Technologies Inc.',
+    facts: {
+      'us-gaap': {
+        Revenues: {
+          units: {
+            USD: [
+              flow('2024-01-01', '2024-12-31', 2865, '10-K', '2025-02-18'),
+              flow('2025-01-01', '2025-12-31', 4475, '10-K', '2026-02-17'),
+              flow('2024-01-01', '2024-09-30', 2047, '10-Q', '2024-11-04'),
+              flow('2025-01-01', '2025-09-30', 3069, '10-Q', '2025-11-04'),
+              flow('2025-07-01', '2025-09-30', 1181, '10-Q', '2025-11-04'), // the quarter alone: not year to date, dropped
+              flow('2026-01-01', '2026-09-30', 5881, '10-Q', '2026-11-03'),
+            ],
+          },
+        },
+        NetIncomeLoss: {
+          units: {
+            USD: [
+              flow('2024-01-01', '2024-12-31', 462, '10-K', '2025-02-18'),
+              flow('2025-01-01', '2025-12-31', 1625, '10-K', '2026-02-17'),
+              flow('2025-01-01', '2025-09-30', 1100, '10-Q', '2025-11-04'),
+              flow('2026-01-01', '2026-09-30', 3145, '10-Q', '2026-11-03'),
+            ],
+          },
+        },
+        StockholdersEquity: { units: { USD: [inst('2025-12-31', 7400, '10-K', '2026-02-17'), inst('2026-09-30', 9800, '10-Q', '2026-11-03')] } },
+      },
+    },
+  };
+
+  it('rolls the 10-K forward with 10-Q year-to-date figures and starts the forecast there', () => {
+    const h = extractHistoricals(raw);
+    expect(h.years.at(-1)).toBe(2025);
+    expect(h.ttm?.end).toBe('2026-09-30');
+    expect(h.ttm!.items.revenue!.value / M).toBeCloseTo(7287, 6);
+    expect(h.ttm!.items.netIncome!.value / M).toBeCloseTo(1625 + 3145 - 1100, 6);
+    expect(h.ttm!.items.equity!.value / M).toBe(9800); // balance sheet from the 10-Q, no arithmetic
+    expect(h.ttm!.prior!.revenue!.value / M).toBeCloseTo(2865 + 3069 - 2047, 6); // the same window a year earlier
+
+    const ttm = defaultAssumptions(h, { price: 170, rf: 0.042, erp: 0.045 }).a;
+    expect(ttm.basis).toBe('ttm');
+    expect(ttm.rev0).toBeCloseTo(7287, 6);
+    expect(ttm.equity0).toBe(9800);
+    expect(ttm.g1).toBeCloseTo(7287 / 3887 - 1, 6); // growth: last 12 months against the 12 months a year earlier
+    expect(runAll(h, ttm, {}).wb.sheets[0].columns.slice(0, 2)).toEqual(['TTM', 'Yr 1']);
+
+    const fy = defaultAssumptions(h, { price: 170, rf: 0.042, erp: 0.045 }, 'fy').a;
+    expect(fy.basis).toBe('fy');
+    expect(fy.rev0).toBeCloseTo(4475, 6);
+    expect(fy.g1).toBeCloseTo(4475 / 2865 - 1, 6);
+  });
+});

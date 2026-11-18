@@ -1,7 +1,7 @@
 import { inputDefs, type Assumptions, type Sources } from './assumptions';
 import { evaluate, resultOf, type ModelId, type SheetDef, type Values, type Workbook } from './calcsheet';
-import { latest } from './extract';
-import { apvSheet, ddmSheets, totalPayoutSheet, fcfeSheet, fcffSheet, multiplesSheet, riFinancialSheet, riSheet, scenarioSheets } from './models';
+import { current } from './extract';
+import { type Base, apvSheet, ddmSheets, totalPayoutSheet, fcfeSheet, fcffSheet, multiplesSheet, riFinancialSheet, riSheet, scenarioSheets } from './models';
 import type { Historicals } from './types';
 
 export interface ModelResult {
@@ -24,8 +24,8 @@ export interface RunOutput {
 }
 
 export function buildWorkbook(h: Historicals, a: Assumptions, src: Sources): Workbook {
-  const baseYear = h.years.at(-1) ?? new Date().getFullYear();
-  const da0 = latest(h, 'da');
+  const baseYear: Base = a.basis === 'ttm' && h.ttm ? 'ttm' : (h.years.at(-1) ?? new Date().getFullYear());
+  const da0 = current(h, 'da', a.basis);
   const ebitda0 = a.rev0 != null && a.margin0 != null ? a.rev0 * a.margin0 + (da0 ?? 0) / 1e6 : null;
   const sheets: SheetDef[] = [
     fcffSheet(a, baseYear, { id: 'fcff', name: 'FCFF', title: 'Discounted free cash flow to the firm', g1: 'g_stage1', margin: 'margin_target', capex: 'capex_pct', shares: 'shares' }),
@@ -42,6 +42,8 @@ export function buildWorkbook(h: Historicals, a: Assumptions, src: Sources): Wor
 
 /** Below this share of earnings paid out, dividends say little about value and the dividend models are skipped. */
 export const MIN_DDM_PAYOUT = 0.2;
+/** Below this dividend yield the price rests on growth, not on the dividend, and the dividend models are skipped. */
+export const MIN_DDM_YIELD = 0.01;
 
 /** Set model statuses from the evaluated inputs: things the formulas alone cannot judge. */
 function judge(wb: Workbook, v: Values, a: Assumptions): string[] {
@@ -78,13 +80,22 @@ function judge(wb: Workbook, v: Values, a: Assumptions): string[] {
 
   const ddmIds = ['ddm_gordon', 'ddm_2stage', 'ddm_h'] as ModelId[];
   if (!(a.dps0 && a.dps0 > 0)) for (const id of ddmIds) set(id, 'na', 'The company pays no dividend, so dividend models do not apply.');
+  else if (i.price != null && i.price > 0 && a.dps0 / i.price < MIN_DDM_YIELD)
+    for (const id of ddmIds)
+      set(
+        id,
+        'na',
+        `The dividend yield is only ${((a.dps0 / i.price) * 100).toFixed(1)}%: investors are paying for growth the dividend does not show yet, so a dividend model would value the payout, not the business.${
+          (a.totalPayout ?? 0) >= MIN_DDM_PAYOUT ? ' The total payout model counts buybacks too.' : ''
+        }`,
+      );
   else if (a.payout < MIN_DDM_PAYOUT)
     for (const id of ddmIds)
       set(
         id,
         'na',
         `Dividends are only ${(a.payout * 100).toFixed(0)}% of earnings, so a dividend model would value the token payout, not the business.${
-          (a.totalPayout ?? 0) >= MIN_DDM_PAYOUT ? ' The total payout model below counts buybacks too.' : ''
+          (a.totalPayout ?? 0) >= MIN_DDM_PAYOUT ? ' The total payout model counts buybacks too.' : ''
         }`,
       );
   if (a.totalPayout == null) set('total_payout', 'na', 'Net income over the last three years is not positive, so there are no earnings to pay out.');
@@ -123,6 +134,12 @@ function judge(wb: Workbook, v: Values, a: Assumptions): string[] {
       );
   }
 
+  // Residual income and FCFE are the same model up to year 10 (clean surplus) and differ only in the terminal value:
+  // FCFE grows the year-10 cash flow, residual income grows book equity, which needs g × book of retained earnings a
+  // year. When the forecast's own reinvestment is far below that (capex near D&A at asset-heavy firms), the two part.
+  const riGap = riFcfeGap(wb, v);
+  if (riGap) set('ri', 'ok', riGap);
+
   // Without a growth cap, a company whose revenue jumped (boom, acquisition, spin-off) gets a very large DCF value. Say so.
   const rev5 = v.sheets.FCFF?.revenue?.[5];
   if (!a.financial && a.g1 > 0.5 && rev5 != null && a.rev0 && a.rev0 > 0)
@@ -143,7 +160,30 @@ function judge(wb: Workbook, v: Values, a: Assumptions): string[] {
   return warnings;
 }
 
-/** Solve for the year-1 revenue growth (fading as in the model) that makes the FCFF value equal the share price (bisection). */
+/** Above this gap between residual income and FCFE, the residual-income card explains where the difference comes from. */
+export const RI_GAP_NOTE = 0.1;
+
+/** Explain a large residual income vs FCFE gap, which comes only from the terminal value (see judge). */
+function riFcfeGap(wb: Workbook, v: Values): string | null {
+  const ri = resultOf(wb, v, 'ri');
+  const fcfe = resultOf(wb, v, 'fcfe');
+  if (wb.sheets.find((s) => s.id === 'ri')?.title !== 'Residual income' || ri == null || fcfe == null || fcfe <= 0) return null;
+  const gap = ri / fcfe - 1;
+  if (Math.abs(gap) <= RI_GAP_NOTE) return null;
+  const F = v.sheets.FCFE;
+  const R = v.sheets.ResidualIncome;
+  const n = F.ni.length - 1;
+  const g = v.inputs.g_terminal ?? 0;
+  const reinvest = (F.ni[n] ?? 0) - (F.fcfe[n] ?? 0);
+  const book = R.book[n] ?? 0;
+  const usd = (x: number) => `${x < 0 ? '-' : ''}$${Math.abs(x).toLocaleString('en-US', { maximumFractionDigits: 0 })}M`;
+  return `Residual income is ${Math.abs(gap * 100).toFixed(0)}% ${gap < 0 ? 'below' : 'above'} FCFE. Up to year 10 the two are the same model; the gap is all in the terminal value. FCFE grows the year-10 cash flow at ${(g * 100).toFixed(1)}% while the company retains ${usd(reinvest)} a year, whereas residual income grows book equity at ${(g * 100).toFixed(1)}%, which takes about ${usd(g * book)} of retained earnings a year. ${
+    reinvest < g * book
+      ? 'FCFE assumes growth with little net investment (capex close to depreciation); residual income makes the company pay for it. For asset-heavy firms the lower value is usually the more realistic one.'
+      : 'Residual income assumes book equity can grow without the reinvestment the forecast makes; FCFE charges for it.'
+  }`;
+}
+
 /** Average revenue growth over years 1-5 of an evaluated FCFF sheet. */
 export const avgGrowth5 = (v: Values): number | null => {
   const g = v.sheets.FCFF?.growth;
@@ -203,7 +243,7 @@ export function runAll(h: Historicals, a: Assumptions, src: Sources): RunOutput 
     warnings.push(
       `FY${a.oneOff.year} operating income includes $${a.oneOff.charges.toFixed(0)}M of impairments, which are non-cash and one-off. The forecast uses the ${(a.oneOff.adjusted * 100).toFixed(1)}% margin before them instead of the reported ${(a.oneOff.latest * 100).toFixed(1)}%. Set the target margin to ${(a.oneOff.latest * 100).toFixed(1)}% to use the reported figure.`,
     );
-  const interest = latest(h, 'interestExpense');
+  const interest = current(h, 'interestExpense', a.basis);
   // Debt found but far below what the interest bill implies (segment-tagged debt at Deere or Caterpillar's finance arms).
   // Banks and insurers pay interest on deposits and policy funds, not just debt, so these checks do not apply to them.
   if (!a.financial && a.debt > 0 && interest != null && interest / 1e6 / (a.rf + 0.03) > 2 * a.debt)

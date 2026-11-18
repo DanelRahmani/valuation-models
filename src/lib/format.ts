@@ -29,3 +29,7 @@ export const fromDisplay = (s: string, f: Fmt) => {
   if (s.trim() === '' || !Number.isFinite(n)) return null;
   return f === 'pct' ? n / 100 : n;
 };
+
+/** ISO date as "30 Sep 2026". */
+export const fmtDate = (iso: string) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });

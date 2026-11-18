@@ -2,7 +2,7 @@
  * Company metrics shared by the peer rankings, the comparison view and the value-creation panel.
  * All money values are in dollars; ratios are plain decimals.
  */
-import { latest } from './extract';
+import { current } from './extract';
 import type { Historicals } from './types';
 
 export interface CompanyMetrics {
@@ -115,13 +115,14 @@ export function computeMetrics(
   c: { ticker: string; name: string; sector: string; subIndustry: string },
   o: { tax: number; shares: number | null; price: number | null; financial: boolean },
 ): CompanyMetrics {
-  const rev = latest(h, 'revenue');
-  const ebit = latest(h, 'operatingIncome');
-  const ni = latest(h, 'netIncome');
-  const eq = latest(h, 'equity');
-  const da = latest(h, 'da') ?? 0;
-  const debt = latest(h, 'debt') ?? 0;
-  const cash = (latest(h, 'cash') ?? 0) + (latest(h, 'shortTermInvestments') ?? 0);
+  // Multiples on the trailing twelve months when 10-Q data exist, as financial sites and the valuation page use.
+  const rev = current(h, 'revenue');
+  const ebit = current(h, 'operatingIncome');
+  const ni = current(h, 'netIncome');
+  const eq = current(h, 'equity');
+  const da = current(h, 'da') ?? 0;
+  const debt = current(h, 'debt') ?? 0;
+  const cash = (current(h, 'cash') ?? 0) + (current(h, 'shortTermInvestments') ?? 0);
   const mcap = o.price != null && o.shares ? o.price * o.shares * 1e6 : null;
   const ebitda = ebit != null ? ebit + da : null;
   const last = valueCreationSeries(h, o.tax, o.financial).at(-1);

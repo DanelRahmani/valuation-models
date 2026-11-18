@@ -143,10 +143,18 @@ export default function Methodology() {
         <div className="max-w-2xl leading-relaxed">
           <H2 id="data">Data</H2>
           <p className="mt-4">
-            Financials come from SEC EDGAR XBRL company facts: annual 10-K values only, de-duplicated so restated figures replace the originals. Companies tag
+            Financials come from SEC EDGAR XBRL company facts: 10-K values, de-duplicated so restated figures replace the originals. Companies tag
             the same concept differently (revenue alone has five common tags), so each line item has an ordered list of fallback tags. A figure is only used
             for the fiscal year it belongs to: if the latest 10-K lacks an item, it shows as missing rather than borrowing an older year. Hover any historical
             figure on a valuation page to see the tag, period and filing date behind it.
+          </p>
+          <p className="mt-4">
+            <strong>Trailing twelve months.</strong> A 10-K can be up to 14 months old by the time the next one is filed, which matters for fast growers:
+            Palantir&apos;s P/E on its 2025 10-K was about 250x, against about 110x on its latest twelve months. So the forecast starts from the last twelve
+            months by default: the last fiscal year, plus the year to date in the latest 10-Q, minus the same period a year earlier (each 10-Q reports both).
+            Cash, debt and book equity come from the latest 10-Q balance sheet. Every annual rule (debt recipes, rebuilt operating income, D&amp;A plus
+            amortisation) runs on the trailing period too. The averages that need comparable periods (tax rate, capex and D&amp;A ratios, payout ratios) and
+            the ten-year history stay on fiscal years. A switch at the top of each valuation page goes back to the last fiscal year alone.
           </p>
           <ul className="mt-4 list-disc space-y-2 pl-5">
             <li>
@@ -277,7 +285,10 @@ export default function Methodology() {
               ['FCFF DCF', 'Free cash flow to the firm, discounted at WACC, minus net debt.'],
               ['FCFE DCF', 'Net income minus the equity-funded share of reinvestment, discounted at the cost of equity, plus cash and investments.'],
               ['APV', 'FCFF discounted at the unlevered cost of equity, plus the present value of interest tax shields (t × D for permanent debt).'],
-              ['Residual income', 'Book equity plus the present value of net income above the equity charge (re × opening book).'],
+              [
+                'Residual income',
+                'Operating book equity (book equity less cash and investments) plus the present value of net income above the equity charge (re × opening book), plus cash and investments. The forecast earns no interest on cash, so charging the cost of equity on it would value it near zero.',
+              ],
               ['Gordon growth', 'V = D₁ / (re - g).'],
               ['Two-stage DDM', 'Five years of dividends growing with the revenue forecast, then Gordon.'],
               ['H-model', 'V = D₀(1 + gL)/(re - gL) + D₀ × H × (gS - gL)/(re - gL), for growth that fades in a straight line.'],
@@ -357,7 +368,10 @@ export default function Methodology() {
           <p className="mt-4">
             FCFF, FCFE, APV and residual income should give similar answers when they share assumptions, and they usually land within a few percent of each
             other. FCFE funds reinvestment at the current debt weight so leverage stays constant. Residual income uses clean-surplus accounting: book equity grows
-            only by what is reinvested, which ties it to FCFE. Large gaps between methods usually point to an inconsistent input, which is itself worth knowing.
+            only by what is reinvested, which ties it to FCFE. Up to year 10 the two are the same model, so any gap between them is in the terminal value:
+            FCFE grows the year-10 cash flow, while residual income grows book equity, which needs g × book of retained earnings a year. When the forecast
+            reinvests much less than that (capex close to depreciation at a REIT or utility), residual income comes out lower, and its card says by how much
+            and why. Large gaps between methods usually point to an inconsistent input, which is itself worth knowing.
           </p>
           <p className="mt-4">
             The engine was checked on NVIDIA: historicals against the 10-K and Yahoo Finance, the FCFF value against an independent recomputation, and the Excel
@@ -388,8 +402,8 @@ export default function Methodology() {
                 'Holding a recent growth rate for five years either needs a cap (an earlier version capped it at 20%, which valued NVIDIA at $114) or projects a boom forward (NVIDIA’s 114% three-year median would put its revenue above $9 trillion). The site now starts from the latest year and fades the growth above a typical 6% along a research path (McKinsey’s observed decay, the default: NVIDIA $144 against a $166 price) or a stricter path backtested on S&P 500 data ($88). Neither path brings the fastest growers to their price unless most of the boom lasts for years, which is the bet the market is making; the reverse DCF shows how big that bet is.',
               ],
               [
-                'Dividend models still run for low-yield growers',
-                'They run whenever dividends are at least 20% of earnings. For Eli Lilly or Costco that gives a value far below the price: the dividend is small next to what the company retains and reinvests, and a dividend model counts only what is paid. That is how the method works, not a bug, so the result is shown rather than hidden. The total payout model, which adds buybacks, and FCFF are the better guides for these firms. Below 20% the dividend models are switched off, because they would value a token payout rather than the business.',
+                'Dividend models need a real dividend',
+                'They run when dividends are at least 20% of earnings and the dividend yield is at least 1%. Eli Lilly and Costco pay out more than 20% of earnings, but at a yield under 1% the price rests on growth the dividend does not show yet: a Gordon model gave Lilly $91 against a $1,427 price. That is the method working as designed, so rather than show a number that looks broken, the dividend models are switched off and point to the total payout model, which adds buybacks, and FCFF.',
               ],
               [
                 'Total payout counts only what is handed back',
@@ -417,7 +431,10 @@ export default function Methodology() {
 
           <h3 className="mt-8 font-serif text-xl">Known limitations</h3>
           <ul className="mt-4 list-disc space-y-2 pl-5">
-            <li>Annual data only; nothing changes between 10-K filings.</li>
+            <li>
+              Trailing twelve months need the 10-Q data in SEC company facts; when a company files late, changes its fiscal year or tags its 10-Q
+              differently from its 10-K, the page falls back to the last fiscal year and says so in the header.
+            </li>
             <li>Leases, pensions, minority interests and options are not adjusted for separately.</li>
             <li>
               Growth through share issuance is not netted out. A REIT that grows by issuing shares to buy property shows the growth but not the dilution, so
@@ -425,7 +442,8 @@ export default function Methodology() {
             </li>
             <li>
               The cash-flow models disagree more for capital-heavy, highly levered firms (utilities, airlines, REITs): FCFE and residual income assume the
-              current debt weight holds, FCFF and APV do not. A wide spread there is information, not an error.
+              current debt weight holds, FCFF and APV do not, and residual income charges for the reinvestment that terminal growth needs. A wide spread
+              there is information, not an error.
             </li>
             <li>
               The growth path starts from one year&apos;s growth. A merger year inflates it and a one-off dip deflates it (Tesla&apos;s -3% after 19% the

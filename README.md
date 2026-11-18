@@ -2,7 +2,7 @@
 
 **Live:** https://valuation.danelrahmani.com
 
-Type an S&P 500 ticker and get eight valuation methods side by side, built from the company's SEC filings:
+Type an S&P 500 ticker and get eight valuation methods side by side, built from the company's SEC filings (the last 10-K rolled forward to the latest 10-Q):
 
 - FCFF DCF, FCFE DCF and APV
 - Residual income
@@ -53,7 +53,7 @@ Add a repository secret `SEC_USER_AGENT` (for example `Valuation Models you@exam
 npm install
 npm run dev                                                   # http://localhost:3000
 SEC_USER_AGENT="Name you@example.com" npm run snapshot -- --only NVDA,AAPL
-npm test                                                      # two tests
+npm test                                                      # unit, regression and data checks
 ```
 
 ## Data sources

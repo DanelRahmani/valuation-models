@@ -114,7 +114,8 @@ export function buildStory(name: string, h: Historicals, out: RunOutput): Story 
     years,
     revenue: rev,
     margin: rev.map((r, i) => (r && ebit[i] != null ? ebit[i]! / r : null)),
-    baseYear: h.years.at(-1)!,
+    // On the trailing-twelve-month basis, year 1 is the twelve months after the latest 10-Q.
+    baseYear: out.wb.sheets[0]?.columns[0] === 'TTM' && h.ttm ? Number(h.ttm.end.slice(0, 4)) : h.years.at(-1)!,
     f,
     wacc: I.wacc,
     g1: I.g_stage1 ?? 0,

@@ -76,10 +76,12 @@ export async function exportWorkbook(
 
   /* Historicals */
   const hist = book.addWorksheet('Historicals');
-  header(hist, ['$ millions', ...h.years.map((y) => `FY${y}`), 'XBRL tag (latest)']);
+  // The trailing twelve months, when 10-Q data exist, follow the fiscal years as their own column.
+  const ttmCol = h.ttm ? [`TTM to ${h.ttm.end}`] : [];
+  header(hist, ['$ millions', ...h.years.map((y) => `FY${y}`), ...ttmCol, 'XBRL tag (latest)']);
   hist.getColumn(1).width = 30;
   (Object.keys(LABELS) as LineItem[]).forEach((k, i) => {
-    const arr = h.items[k] ?? [];
+    const arr = [...(h.items[k] ?? []), ...(h.ttm ? [h.ttm.items[k] ?? null] : [])];
     const r = hist.getRow(i + 2);
     r.getCell(1).value = LABELS[k];
     arr.forEach((x, j) => {
@@ -87,7 +89,7 @@ export async function exportWorkbook(
       c.value = x ? x.value / 1e6 : null;
       c.numFmt = '#,##0';
     });
-    r.getCell(h.years.length + 2).value = arr.at(-1)?.tag ?? 'missing';
+    r.getCell(h.years.length + ttmCol.length + 2).value = arr.at(-1)?.tag ?? 'missing';
   });
 
   /* Model sheets */
