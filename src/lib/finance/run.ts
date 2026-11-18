@@ -127,13 +127,13 @@ function judge(wb: Workbook, v: Values, a: Assumptions): string[] {
   const rev5 = v.sheets.FCFF?.revenue?.[5];
   if (!a.financial && a.g1 > 0.5 && rev5 != null && a.rev0 && a.rev0 > 0)
     warnings.push(
-      `Revenue grew ${(a.g1 * 100).toFixed(0)}% in the latest year (a boom, an acquisition or a spin-off). The forecast fades that growth but still multiplies revenue ${(rev5 / a.rev0).toFixed(1)}× in five years. Check that the growth is organic and repeatable before trusting the DCF values.`,
+      `Revenue grew ${(a.g1 * 100).toFixed(0)}% in the latest year (a boom, an acquisition or a spin-off). The forecast fades that growth but still multiplies revenue ${(rev5 / a.rev0).toFixed(1)}Ã— in five years. Check that the growth is organic and repeatable before trusting the DCF values.`,
     );
   const fcffPs = resultOf(wb, v, 'fcff');
   const px = i.price;
   if (!a.financial && fcffPs != null && fcffPs > 0 && px != null && px > 0 && (fcffPs / px > 4 || fcffPs / px < 0.25))
     warnings.push(
-      `The FCFF value is ${(fcffPs / px).toFixed(1)}× the share price. When a model and the market are this far apart, an input (growth, margin, debt, share count) is usually off or the market is pricing something the history does not show; treat the gap as a prompt to check, not as a price target.`,
+      `The FCFF value is ${(fcffPs / px).toFixed(1)}Ã— the share price. When a model and the market are this far apart, an input (growth, margin, debt, share count) is usually off or the market is pricing something the history does not show; treat the gap as a prompt to check, not as a price target.`,
     );
 
   const fcff = wb.sheets.find((s) => s.id === 'fcff')!;
