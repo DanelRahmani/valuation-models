@@ -3,7 +3,7 @@
  * Scenario maker: saved what-ifs on top of the base case, stored in this browser only. Three levels of freedom: pick a
  * template, adjust a few plain fields, or open every lever plus a year-by-year grid. All of it is numbers, never code.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { Assumptions, Sources } from '@/lib/finance/assumptions';
 import type { ModelId } from '@/lib/finance/calcsheet';
 import { quickRun, type ModelResult } from '@/lib/finance/run';
@@ -57,7 +57,23 @@ const fromUi = (n: number, op: Op, f: LeverFmt) => (op !== 'scale' && f === 'pct
 const OP_LABEL: Record<Op, string> = { set: 'set to', add: 'change by', scale: 'multiply by' };
 
 export const headlineId = (financial: boolean): ModelId => (financial ? 'ri' : 'fcff');
-const MODELS: ModelId[] = ['fcff', 'fcfe', 'apv', 'ri', 'multiples', 'total_payout', 'ddm_gordon', 'ddm_2stage', 'ddm_h'];
+/** Models driven by the ten-year forecast; the rest rest on today's figures and are shown for reference. */
+const FORECAST_MODELS: ModelId[] = ['fcff', 'fcfe', 'apv', 'ri'];
+const MODELS: ModelId[] = [...FORECAST_MODELS, 'multiples', 'total_payout', 'ddm_gordon', 'ddm_2stage', 'ddm_h'];
+
+/** "Risk-free rate yrs 1-2" for the year-by-year values a scenario sets, which the input rows cannot show. */
+function pathSummary(s: Scenario): string {
+  return (s.paths ?? [])
+    .map((p) => {
+      const yrs = p.values.map((v, i) => (v != null ? i + 1 : 0)).filter(Boolean);
+      if (!yrs.length) return '';
+      const span = yrs.length === 1 ? `yr ${yrs[0]}` : `yrs ${yrs[0]}-${yrs[yrs.length - 1]}`;
+      const vals = Array.from(new Set(p.values.filter((v): v is number => v != null).map((v) => `${p.mode === 'add' && v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}${p.mode === 'add' ? ' pts' : '%'}`)));
+      return `${PATH_META[p.lever].label} ${p.mode === 'set' ? '' : 'change '}${vals.length === 1 ? vals[0] : 'varies'} (${span})`;
+    })
+    .filter(Boolean)
+    .join('; ');
+}
 const pctDiff = (x: number | null | undefined, b: number | null | undefined) => (x != null && b != null && b !== 0 ? x / b - 1 : null);
 
 /** A numeric text box that commits on blur or Enter, like the sidebar fields. */
@@ -325,20 +341,45 @@ export function ScenariosTab({
         <p className="mt-1 text-xs text-muted">Each template changes assumptions relative to this company&apos;s base case. Open one, adjust it, save it.</p>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {templates.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setDraft(fromTemplate(t))}
-              className="rounded-2xl border border-seam bg-panel/60 px-4 py-3 text-left transition-colors hover:border-accent"
-            >
+            <div key={t.id} className="flex flex-col rounded-2xl border border-seam bg-panel/60 px-4 py-3 transition-colors hover:border-accent">
               <div className="font-serif text-lg">{t.name}</div>
               <p className="mt-1 text-sm">{t.story}</p>
               <p className="mt-1.5 text-xs text-muted">{t.why}</p>
-            </button>
+              {t.caution?.(a) && <p className="mt-1.5 text-xs text-accent">{t.caution(a)}</p>}
+              <Evidence t={t} />
+              <button type="button" onClick={() => setDraft(fromTemplate(t))} className="mt-3 self-start rounded-full border border-accent/50 px-4 py-1 text-sm text-accent hover:bg-accent/5">
+                Use this template
+              </button>
+            </div>
           ))}
         </div>
       </div>
     </section>
+  );
+}
+
+/** Where a template's numbers come from: the evidence, which numbers are judgment, and the sources. */
+function Evidence({ t }: { t: ScenarioTemplate }) {
+  return (
+    <details className="mt-2 text-xs">
+      <summary className="cursor-pointer text-accent">Where the numbers come from</summary>
+      <p className="mt-1 text-muted">{t.basis}</p>
+      {t.sources.length > 0 && (
+        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-muted">
+          {t.sources.map((s) => (
+            <li key={s.label}>
+              {s.url ? (
+                <a href={s.url} target="_blank" rel="noreferrer" className="link">
+                  {s.label}
+                </a>
+              ) : (
+                s.label
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
   );
 }
 
@@ -393,10 +434,20 @@ function Comparison({
             </tr>
           </thead>
           <tbody>
-            {models.map((id) => {
+            {models.map((id, k) => {
               const b = cell(baseResults, id)?.perShare ?? null;
+              const ref = !FORECAST_MODELS.includes(id);
+              const firstRef = ref && (k === 0 || FORECAST_MODELS.includes(models[k - 1]));
               return (
-                <tr key={id} className="border-b border-seam/60">
+                <Fragment key={id}>
+                {firstRef && (
+                  <tr className="border-b border-seam/60">
+                    <td colSpan={2 + runs.length} className="sticky left-0 bg-panel px-2 pb-1 pt-3 font-sans text-xs text-muted">
+                      For reference: these rest on today&apos;s earnings, dividends and peer multiples, not on the forecast, so scenarios move them little or unevenly.
+                    </td>
+                  </tr>
+                )}
+                <tr className={`border-b border-seam/60 ${ref ? 'text-muted' : ''}`}>
                   <td className="sticky left-0 bg-panel px-2 py-1.5 font-sans">{MODEL_NOTES[id]?.short ?? id}</td>
                   <td className="px-3 py-1.5 text-right">{fmt(b, 'usd') || '–'}</td>
                   {runs.map(({ s, results }) => {
@@ -411,6 +462,7 @@ function Comparison({
                     );
                   })}
                 </tr>
+                </Fragment>
               );
             })}
             {inputRows.map((row) => (
@@ -424,6 +476,17 @@ function Comparison({
                 ))}
               </tr>
             ))}
+            {runs.some(({ s }) => pathSummary(s)) && (
+              <tr className="border-b border-seam/60 text-muted">
+                <td className="sticky left-0 bg-panel px-2 py-1.5 font-sans">Also year by year</td>
+                <td className="px-3 py-1.5 text-right">–</td>
+                {runs.map(({ s }) => (
+                  <td key={s.id} className="px-3 py-1.5 text-right font-sans text-xs">
+                    {pathSummary(s) || '–'}
+                  </td>
+                ))}
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -523,6 +586,16 @@ function ScenarioEditor({
             {v?.status === 'ok' && pctDiff(v.perShare, baseV) != null && ` · ${pctDiff(v.perShare, baseV)! >= 0 ? '+' : ''}${(pctDiff(v.perShare, baseV)! * 100).toFixed(0)}%`}
           </div>
           {v?.status !== 'ok' && v?.message && <p className="mt-1 text-xs text-muted">{v.message}</p>}
+          {(() => {
+            const t = templates.find((x) => x.id === s.templateId);
+            const note = t?.caution?.(a);
+            return (
+              <>
+                {note && <p className="mt-2 text-xs text-accent">{note}</p>}
+                {t && <Evidence t={t} />}
+              </>
+            );
+          })()}
           {applied.notes.map((n) => (
             <p key={n} className="mt-2 text-xs text-muted">
               {n}

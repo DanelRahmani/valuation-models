@@ -28,6 +28,7 @@ export type VirtualLever =
   | 'shockRevLoss'
   | 'shockMarginDrop'
   | 'shockRecovery'
+  | 'shockPermanent'
   | 'shockGrowthCut'
   | 'capexHighYears'
   | 'capexNormal'
@@ -70,7 +71,7 @@ export type LeverFmt = 'pct' | 'num' | 'x' | 'beta' | 'yrs' | 'flag';
 
 export interface LeverMeta {
   label: string;
-  group: 'Growth' | 'Margins' | 'New-entrant shock' | 'Reinvestment' | 'Capacity' | 'Rates' | 'Risk and end value';
+  group: 'Growth' | 'Margins' | 'Shock (one-time hit)' | 'Reinvestment' | 'Capacity' | 'Rates' | 'Risk and end value';
   fmt: LeverFmt;
   /** The operation the editor offers first. */
   op: Op;
@@ -88,11 +89,12 @@ export const LEVERS: Record<Lever, LeverMeta> = {
   gT: { label: 'Terminal growth', group: 'Growth', fmt: 'pct', op: 'add', min: -0.02, max: 0.05, financial: true, help: 'Capped at the risk-free rate.' },
   marginTarget: { label: 'Operating margin, target', group: 'Margins', fmt: 'pct', op: 'add', min: -0.5, max: 0.9, financial: false },
   marginYears: { label: 'Years to reach target margin', group: 'Margins', fmt: 'yrs', op: 'set', min: 1, max: 10, financial: false },
-  shockYear: { label: 'Shock year (0 = none)', group: 'New-entrant shock', fmt: 'yrs', op: 'set', min: 0, max: 10, financial: false, help: 'The year a rival product takes off.' },
-  shockRevLoss: { label: 'Revenue lost in the shock year', group: 'New-entrant shock', fmt: 'pct', op: 'set', min: 0, max: 0.9, financial: false, help: 'A one-time drop in revenue level; growth carries on from there.' },
-  shockMarginDrop: { label: 'Margin hit', group: 'New-entrant shock', fmt: 'pct', op: 'set', min: 0, max: 0.9, financial: false, help: 'Operating margin points lost from the shock year on.' },
-  shockRecovery: { label: 'Margin hit won back by year 10', group: 'New-entrant shock', fmt: 'pct', op: 'set', min: 0, max: 1, financial: false, help: '0% = permanent, 100% = fully recovered.' },
-  shockGrowthCut: { label: 'Slower growth after the shock', group: 'New-entrant shock', fmt: 'pct', op: 'set', min: -0.2, max: 0.5, financial: false, help: 'Points off growth every year after the shock.' },
+  shockYear: { label: 'Shock year (0 = none)', group: 'Shock (one-time hit)', fmt: 'yrs', op: 'set', min: 0, max: 10, financial: false, help: 'The year a rival product takes off.' },
+  shockRevLoss: { label: 'Revenue lost in the shock year', group: 'Shock (one-time hit)', fmt: 'pct', op: 'set', min: 0, max: 0.9, financial: false, help: 'A one-time drop in revenue level; growth carries on from there.' },
+  shockMarginDrop: { label: 'Margin hit', group: 'Shock (one-time hit)', fmt: 'pct', op: 'set', min: 0, max: 0.9, financial: false, help: 'Operating margin points lost from the shock year on.' },
+  shockPermanent: { label: 'Share of the margin hit that is permanent', group: 'Shock (one-time hit)', fmt: 'pct', op: 'set', min: 0, max: 1, financial: false, help: 'The part competition keeps for good; 0% = a purely cyclical hit.' },
+  shockRecovery: { label: 'Rest of the hit recovered each year', group: 'Shock (one-time hit)', fmt: 'pct', op: 'set', min: 0, max: 1, financial: false, help: 'Profitability reverts about 38% a year on average (Fama and French, 2000); 0% = none of it recovers.' },
+  shockGrowthCut: { label: 'Slower growth after the shock', group: 'Shock (one-time hit)', fmt: 'pct', op: 'set', min: -0.2, max: 0.5, financial: false, help: 'Points off growth every year after the shock.' },
   capexPct: { label: 'Capex, % of revenue', group: 'Reinvestment', fmt: 'pct', op: 'scale', min: 0, max: 1, financial: false },
   capexHighYears: { label: 'Years capex stays high', group: 'Reinvestment', fmt: 'yrs', op: 'set', min: 0, max: 10, financial: false, help: 'Base: 5, then it fades to normal by year 10.' },
   capexNormal: { label: 'Normal capex after that', group: 'Reinvestment', fmt: 'pct', op: 'set', min: 0, max: 1, financial: false, help: 'Base: D&A (or capex, if lower).' },
@@ -118,6 +120,7 @@ export const VIRTUAL_DEFAULTS: Record<VirtualLever, number> = {
   shockRevLoss: 0,
   shockMarginDrop: 0,
   shockRecovery: 0,
+  shockPermanent: 0,
   shockGrowthCut: 0,
   capexHighYears: 5,
   capexNormal: NaN,

@@ -96,7 +96,9 @@ export function applyScenario(base: Assumptions, s: Pick<Scenario, 'changes' | '
       if (v.shockRevLoss > 0) row('revStep')[S] = 1 - v.shockRevLoss;
       if (v.shockMarginDrop > 0) {
         const r = row('marginAdd');
-        for (let t = S; t <= N; t++) r[t] -= v.shockMarginDrop * (1 - (v.shockRecovery * (t - S)) / Math.max(N - S, 1));
+        // The permanent part stays; the rest decays geometrically, the way profitability reverts to its mean.
+        const p = v.shockPermanent;
+        for (let t = S; t <= N; t++) r[t] -= v.shockMarginDrop * (p + (1 - p) * Math.pow(1 - v.shockRecovery, t - S));
       }
       if (v.shockGrowthCut !== 0) {
         const r = row('growthAdd');
