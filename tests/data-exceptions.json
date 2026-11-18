@@ -1,10 +1,13 @@
 {
-  "_about": "Known data-check errors caused by the filing itself, not by this code. Each entry: ticker -> check id -> reason. The data-checks test fails on any error not listed here, and on any entry that no longer occurs (so the list cannot rot).",
+  "_about": "Known data-check errors caused by the filing itself, not by this code. Each entry: ticker -> check id -> reason. The data-checks test fails on any error not listed here, and on any entry that no longer occurs (so the list cannot rot). A reason starting with \"Intermittent:\" is exempt from the stale check, for filings that hover at a limit.",
   "APA": {
     "missing-core": "APA tags revenue only by product (oil, gas, NGL) with dimensions; the company-level revenue total is not in SEC company facts."
   },
   "FOX": {
-    "market-cap": "Nasdaq's market caps for Fox's two share classes (FOX and FOXA) imply about 570M shares; Fox has about 430M Class A and Class B shares combined (diluted weighted shares in its 10-Q), so the Nasdaq figure is off, not the share count. FOXA sits just under the 25% limit and may need the same entry."
+    "market-cap": "Intermittent: Nasdaq's market caps for Fox's two share classes imply about 570M shares, against about 430M Class A and Class B shares combined in Fox's filings (diluted weighted shares). The gap sits near the 25% limit, so the error comes and goes with the price."
+  },
+  "FOXA": {
+    "market-cap": "Intermittent: Nasdaq's market caps for Fox's two share classes imply about 570M shares, against about 430M Class A and Class B shares combined in Fox's filings (diluted weighted shares). The gap sits near the 25% limit, so the error comes and goes with the price."
   },
   "LHX": {
     "missing-core": "L3Harris tagged full-year FY2025 revenue ($21.9B) with a start date of 2025-10-04, so it reads as a quarter."

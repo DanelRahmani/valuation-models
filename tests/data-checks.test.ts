@@ -40,7 +40,11 @@ describe('data checks on every company', () => {
   it('has no stale exceptions', () => {
     const stale = Object.entries(exceptions)
       .filter(([t]) => !t.startsWith('_'))
-      .flatMap(([t, ids]) => Object.keys(ids).filter((id) => !results[t]?.some((i) => i.id === id && i.severity === 'error')).map((id) => `${t} [${id}]`));
+      .flatMap(([t, ids]) =>
+        Object.keys(ids)
+          .filter((id) => !ids[id].startsWith('Intermittent:') && !results[t]?.some((i) => i.id === id && i.severity === 'error'))
+          .map((id) => `${t} [${id}]`),
+      );
     expect(stale).toEqual([]);
   });
 
