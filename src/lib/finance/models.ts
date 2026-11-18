@@ -242,7 +242,7 @@ export function ddmSheets(): SheetDef[] {
     columns: ['Value'],
     rows: [
       { key: 'stable', label: 'Stable part: D0 × (1 + gL) / (re - gL)', fmt: 'usd', cells: ['=dps_0*(1+g_terminal)/(re-g_terminal)'] },
-      { key: 'extra', label: 'Extra growth: D0 × H × (gS - gL) / (re - gL)', fmt: 'usd', cells: ['=dps_0*h_half_life*(g_stage1-g_terminal)/(re-g_terminal)'] },
+      { key: 'extra', label: 'Extra growth: D0 × H × (gS - gL) / (re - gL)', fmt: 'usd', cells: ['=dps_0*h_half_life*(@FCFF.growth[1]-g_terminal)/(re-g_terminal)'] },
       { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: ['=@stable[0]+@extra[0]'] },
     ],
     result: { row: 'per_share', col: 0 },
