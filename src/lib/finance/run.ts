@@ -27,11 +27,12 @@ export function buildWorkbook(h: Historicals, a: Assumptions, src: Sources): Wor
   const baseYear: Base = a.basis === 'ttm' && h.ttm ? 'ttm' : (h.years.at(-1) ?? new Date().getFullYear());
   const da0 = current(h, 'da', a.basis);
   const ebitda0 = a.rev0 != null && a.margin0 != null ? a.rev0 * a.margin0 + (da0 ?? 0) / 1e6 : null;
+  const rp = !!a.adjust?.rfAdd;
   const sheets: SheetDef[] = [
     fcffSheet(a, baseYear, { id: 'fcff', name: 'FCFF', title: 'Discounted free cash flow to the firm', g1: 'g_stage1', margin: 'margin_target', capex: 'capex_pct', shares: 'shares' }),
-    fcfeSheet(baseYear),
-    apvSheet(baseYear),
-    a.financial ? riFinancialSheet(baseYear) : riSheet(baseYear),
+    fcfeSheet(baseYear, rp),
+    apvSheet(baseYear, rp),
+    a.financial ? riFinancialSheet(baseYear, rp) : riSheet(baseYear, rp),
     ...ddmSheets(),
     totalPayoutSheet(),
     multiplesSheet(a, ebitda0),
@@ -268,4 +269,18 @@ export function runAll(h: Historicals, a: Assumptions, src: Sources): RunOutput 
     sensitivity: fcffOk && a.terminalMethod === 'gordon' ? sensitivity(wb, values) : null,
     warnings,
   };
+}
+
+/**
+ * The models' values without the reverse DCF and sensitivity grid: cheap enough to run once per saved scenario for the
+ * comparison table and the editor's live preview.
+ */
+export function quickRun(h: Historicals, a: Assumptions, src: Sources): { wb: Workbook; values: Values; results: ModelResult[] } {
+  const wb = buildWorkbook(h, a, src);
+  const values = evaluate(wb);
+  judge(wb, values, a);
+  const results = wb.sheets
+    .filter((s) => !s.id.startsWith('fcff_'))
+    .map((s) => ({ id: s.id, sheet: s, perShare: resultOf(wb, values, s.id), status: s.status, message: s.message }));
+  return { wb, values, results };
 }

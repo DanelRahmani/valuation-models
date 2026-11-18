@@ -57,7 +57,51 @@ export interface Assumptions {
   oneOff?: { year: number; latest: number; adjusted: number; charges: number; tag: string } | null;
   newShares: number;
   scenarios: Record<'bear' | 'base' | 'bull', { g1: number; margin: number; capexPct: number; prob: number }>;
+  /** Per-year adjustments compiled from a saved scenario (src/lib/scenarios). Absent = the base case, untouched. */
+  adjust?: Adjust;
 }
+
+/**
+ * Per-year adjustment rows for the FCFF forecast, one number per year (index 1-10; index 0 unused). The formula engine has
+ * no IF, so a scenario's shocks, caps and year-by-year values are compiled to plain numbers and the sheet only adds and
+ * multiplies them. Every field is optional; a missing field leaves that part of the forecast exactly as it is.
+ */
+export interface Adjust {
+  /** Added to revenue growth. Neutral 0. */
+  growthAdd?: number[];
+  /** Growth set to a value: weight (0 or 1) and value. Neutral weight 0. */
+  growthSetW?: number[];
+  growthSetV?: number[];
+  /** Highest growth allowed. Neutral 10 (1000%). */
+  growthCap?: number[];
+  /** Revenue level multiplier (one-time steps). Neutral 1. */
+  revStep?: number[];
+  /** Added to operating margin. Neutral 0. */
+  marginAdd?: number[];
+  /** Margin set to a value: weight and value. Neutral weight 0. */
+  marginSetW?: number[];
+  marginSetV?: number[];
+  /** Capex as a share of revenue, year by year. Neutral = the model's own path. */
+  capex?: number[];
+  /** Change in the risk-free rate in each year (temporary rate path). Neutral 0. */
+  rfAdd?: number[];
+  /** Whether the cost of debt moves with the rate path (affects WACC's sensitivity to it). */
+  rdFollowsRf?: boolean;
+}
+
+export const ADJUST_FIELDS = [
+  'growthAdd',
+  'growthSetW',
+  'growthSetV',
+  'growthCap',
+  'revStep',
+  'marginAdd',
+  'marginSetW',
+  'marginSetV',
+  'capex',
+  'rfAdd',
+] as const;
+export type AdjustField = (typeof ADJUST_FIELDS)[number];
 
 /** Where each default came from, for the source badges. */
 export type Sources = Partial<Record<keyof Assumptions, string>>;
