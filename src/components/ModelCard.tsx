@@ -76,6 +76,7 @@ export function CalcTable({ sheet, wb, values }: { sheet: SheetDef; wb: Workbook
 export function ModelCard({
   sheet,
   perShare,
+  basePerShare,
   price,
   wb,
   values,
@@ -83,6 +84,8 @@ export function ModelCard({
 }: {
   sheet: SheetDef;
   perShare: number | null;
+  /** Set while a scenario is on: this model's base-case value, shown under the scenario value. */
+  basePerShare?: number | null;
   price: number | null;
   wb: Workbook;
   values: Values;
@@ -106,6 +109,9 @@ export function ModelCard({
             </>
           ) : (
             <Badge tone="accent">{sheet.status === 'na' ? 'Not applicable' : 'Needs input'}</Badge>
+          )}
+          {basePerShare !== undefined && (
+            <div className="num mt-0.5 text-xs text-muted">Base case {basePerShare != null ? fmt(basePerShare, 'usd') : 'n/a'}</div>
           )}
         </div>
       </div>
