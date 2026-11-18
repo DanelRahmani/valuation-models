@@ -48,6 +48,14 @@ jobs:
           npx tsc --noEmit
           npx vitest run
 
+      - name: Keep the new data for inspection when the tests fail
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-data
+          path: public/data
+          retention-days: 7
+
       - name: Disk and data size
         if: always()
         run: |
