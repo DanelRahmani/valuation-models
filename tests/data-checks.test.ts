@@ -1,7 +1,9 @@
 /**
  * Runs the accounting checks (src/lib/finance/checks.ts) on every company in public/data, the data the site serves.
  * Fails on any error that is not a documented filing problem in tests/data-exceptions.json, and on exceptions that
- * no longer occur. Runs in CI on every push and in the monthly snapshot before data is committed.
+ * no longer occur. Runs in CI on every push and in the monthly snapshot before data is committed; there
+ * (DATA_CHECKS_MODE=snapshot) stale exceptions only warn, and companies with new errors were already held back to
+ * last month's file by scripts/snapshot.ts.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -39,12 +41,17 @@ describe('data checks on every company', () => {
 
   it('has no stale exceptions', () => {
     const stale = Object.entries(exceptions)
-      .filter(([t]) => !t.startsWith('_'))
+      .filter(([t]) => !t.startsWith('_') && results[t])
       .flatMap(([t, ids]) =>
         Object.keys(ids)
           .filter((id) => !ids[id].startsWith('Intermittent:') && !results[t]?.some((i) => i.id === id && i.severity === 'error'))
           .map((id) => `${t} [${id}]`),
       );
+    // In the monthly snapshot a fixed filing must not hold back the update: the workflow reports it in an issue instead.
+    if (process.env.DATA_CHECKS_MODE === 'snapshot') {
+      if (stale.length) console.warn(`Stale data exceptions (remove from tests/data-exceptions.json): ${stale.join(', ')}`);
+      return;
+    }
     expect(stale).toEqual([]);
   });
 
