@@ -29,3 +29,7 @@ export const fromDisplay = (s: string, f: Fmt) => {
   if (s.trim() === '' || !Number.isFinite(n)) return null;
   return f === 'pct' ? n / 100 : n;
 };
+
+/** ISO date as "30 Sep 2026". */
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export const fmtDate = (iso: string) => `${Number(iso.slice(8, 10))} ${MONTHS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}`;

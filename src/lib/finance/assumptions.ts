@@ -1,9 +1,11 @@
-import { latest } from './extract';
+import { current, currentFact, latest, type Basis } from './extract';
 import type { Historicals, LineItem, SnapshotBeta } from './types';
 import type { InputDef } from './calcsheet';
 
 /** Every user-editable number, in $ millions and millions of shares unless noted. */
 export interface Assumptions {
+  /** Starting point of the forecast: trailing twelve months to the latest 10-Q, or the last fiscal year (10-K). */
+  basis: Basis;
   price: number | null;
   rf: number;
   erp: number;
@@ -146,28 +148,37 @@ export interface MarketContext {
   marketCap?: { value: number; date: string } | null;
 }
 
-export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Assumptions; src: Sources } {
+/** How the starting period is named in source notes: "FY2025" or "the 12 months to 2026-09-30". */
+export function basisLabel(h: Historicals, basis: Basis): string {
+  return basis === 'ttm' && h.ttm ? `the 12 months to ${h.ttm.end}` : `FY${h.years.at(-1) ?? ''}`;
+}
+
+export function defaultAssumptions(h: Historicals, mkt: MarketContext, basisWanted: Basis = 'ttm'): { a: Assumptions; src: Sources } {
   const src: Sources = {};
-  const tagOf = (i: LineItem) => h.items[i]?.at(-1)?.tag;
+  const basis: Basis = basisWanted === 'ttm' && h.ttm ? 'ttm' : 'fy';
+  const tagOf = (i: LineItem) => currentFact(h, i, basis)?.tag;
   const fy = h.years.at(-1);
+  const period = basisLabel(h, basis);
+  const filing = basis === 'ttm' ? `10-Q to ${h.ttm!.end}` : `FY${fy} 10-K`;
+  const cur = (i: LineItem) => current(h, i, basis);
 
   const rf = mkt.rf ?? 0.042;
   src.rf = mkt.rf != null ? '10-year Treasury (FRED DGS10)' : 'Default 4.2%';
   const erp = mkt.erp ?? 0.045;
   src.erp = mkt.erp != null ? 'Damodaran implied ERP' : 'Default 4.5%';
 
-  const rev = latest(h, 'revenue');
-  const ebit = latest(h, 'operatingIncome');
-  const ni = latest(h, 'netIncome');
+  const rev = cur('revenue');
+  const ebit = cur('operatingIncome');
+  const ni = cur('netIncome');
   // Shares: the latest cover-page count (10-K or 10-Q, so later splits count). Companies with several share
   // classes often report only one class there; if it is far below diluted shares, diluted shares are used.
   const cover = h.latestShares?.value ?? latest(h, 'sharesOutstanding');
-  const diluted = latest(h, 'dilutedShares');
+  const diluted = cur('dilutedShares');
   let sharesRaw = cover;
-  src.shares = h.latestShares ? `Cover page of the ${h.latestShares.tag.includes('10-Q') ? '10-Q' : '10-K'} dated ${h.latestShares.end}` : `${tagOf('sharesOutstanding')}, latest 10-K`;
+  src.shares = h.latestShares ? `Cover page of the ${h.latestShares.tag.includes('10-Q') ? '10-Q' : '10-K'} dated ${h.latestShares.end}` : `${h.items.sharesOutstanding?.at(-1)?.tag}, latest 10-K`;
   if (diluted != null && (cover == null || cover < 0.6 * diluted)) {
     sharesRaw = diluted;
-    src.shares = cover == null ? 'Diluted weighted shares, latest 10-K' : 'Diluted weighted shares, latest 10-K (the cover page lists only one share class)';
+    src.shares = cover == null ? `Diluted weighted shares, ${filing}` : `Diluted weighted shares, ${filing} (the cover page lists only one share class)`;
   }
   // Cross-check against the market: a split, reverse split or merger after the latest filing moves the share
   // count by 1.5x or more. Small gaps (share classes, buybacks) are left alone.
@@ -181,12 +192,12 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
   }
   const shares = sharesRaw != null ? sharesRaw / M : null;
 
-  const cash = (latest(h, 'cash') ?? 0) / M;
-  const sti = (latest(h, 'shortTermInvestments') ?? 0) / M;
-  const debt = (latest(h, 'debt') ?? 0) / M;
-  src.cash = `FY${fy} 10-K`;
-  src.sti = `FY${fy} 10-K`;
-  src.debt = `FY${fy} 10-K, total debt (${tagOf('debt') ?? 'none reported'})`;
+  const cash = (cur('cash') ?? 0) / M;
+  const sti = (cur('shortTermInvestments') ?? 0) / M;
+  const debt = (cur('debt') ?? 0) / M;
+  src.cash = filing;
+  src.sti = filing;
+  src.debt = `${filing}, total debt (${tagOf('debt')?.replace(/, last 12 months.*$/, '') ?? 'none reported'})`;
 
   // Pooled 3-yr effective rate (sum of tax / sum of pre-tax income), so one year of tax benefits
   // cannot swing it. A negative or implausible rate is not sustainable, so the statutory rate is used.
@@ -204,7 +215,7 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
         ? `US statutory 21% (3-yr effective rate of ${(pooled * 100).toFixed(0)}% is not sustainable)`
         : '3-yr effective tax rate (total tax / total pre-tax income)';
 
-  const interest = latest(h, 'interestExpense');
+  const interest = cur('interestExpense');
   const rdRaw = interest != null && debt > 0 ? interest / M / debt : null;
   const rd = rdRaw != null ? clamp(rdRaw, rf + 0.01, rf + 0.08) : rf + 0.01;
   src.rd = rdRaw != null ? 'Interest expense / debt, between risk-free + 1% and + 8%' : 'Risk-free + 1%';
@@ -228,17 +239,17 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
   } else src.beta = 'Default 1.0';
 
   const margin0 = rev && ebit != null ? ebit / rev : null;
-  src.margin0 = `FY${fy} operating margin`;
+  src.margin0 = `Operating margin, ${period}`;
   src.marginTarget = 'Held at current margin';
 
   // One-off charges: impairments of goodwill, intangibles and long-lived assets are non-cash and do not recur, but
   // they sink that year's operating margin. When they exceed 1% of revenue, the forecast adds them back.
-  const imp = h.items.impairments?.at(-1);
+  const imp = currentFact(h, 'impairments', basis);
   const oneOff =
     margin0 != null && rev && ebit != null && imp && imp.value > 0.01 * rev && fy != null
       ? { year: fy, latest: margin0, adjusted: (ebit + imp.value) / rev, charges: imp.value / M, tag: imp.tag }
       : null;
-  if (oneOff) src.marginTarget = `FY${fy} margin before $${oneOff.charges.toFixed(0)}M of impairments (${oneOff.tag})`;
+  if (oneOff) src.marginTarget = `${basis === 'ttm' ? 'Last-12-month' : `FY${fy}`} margin before $${oneOff.charges.toFixed(0)}M of impairments (${oneOff.tag})`;
 
   const cagrYears = Math.min(3, h.years.length - 1);
   const revs = h.items.revenue ?? [];
@@ -255,7 +266,9 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
   // The forecast starts from the latest year's revenue growth and fades it as S&P 500 companies' growth has actually
   // faded (GROWTH_CAL), so a boom is respected without being projected forward and no growth cap is needed. The median
   // of the last three years stands in when the latest year is missing. The wide bounds only stop data errors.
-  const lastTwo = revs.slice(-2);
+  // On the trailing basis, growth is the last twelve months over the twelve months a year earlier.
+  const lastTwo =
+    basis === 'ttm' ? [h.ttm!.prior?.revenue ?? null, h.ttm!.items.revenue ?? null] : revs.slice(-2);
   const latestG =
     lastTwo.length === 2 && lastTwo[0] && lastTwo[1] && lastTwo[0].value > 0 ? lastTwo[1].value / lastTwo[0].value - 1 : null;
   const gStart = latestG ?? cagr;
@@ -263,7 +276,7 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
   src.g1 =
     gStart == null
       ? 'Default 5%'
-      : `${latestG != null ? `FY${fy} revenue growth` : `Median revenue growth of the last ${yoy.length} years`}; the forecast fades it as S&P 500 growth has faded`;
+      : `${latestG != null ? `Revenue growth, ${period}${basis === 'ttm' ? ' against the 12 months a year earlier' : ''}` : `Median revenue growth of the last ${yoy.length} years`}; the forecast fades it as S&P 500 growth has faded`;
   const gT = Math.min(0.025, rf);
   src.gT = 'Long-run nominal growth, capped at the risk-free rate';
 
@@ -278,7 +291,7 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
   src.capexPct = capexMissing ? 'Not tagged in the SEC data: assumed equal to D&A' : '3-yr average';
   src.nwcPct = 'Default: 10% of each new dollar of revenue';
 
-  const div = latest(h, 'dividendsPaid');
+  const div = cur('dividendsPaid');
   const dps0 = div != null && shares ? div / M / shares : null;
   src.dps0 = div != null ? `${tagOf('dividendsPaid')} / shares` : 'No dividends reported';
   const payout = clamp(pooledRatio(h, 'dividendsPaid', 'netIncome') ?? 0, 0, 1);
@@ -298,7 +311,7 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
       ? '3-yr dividends / net income: dividends exceed accounting earnings'
       : '3-yr (dividends + buybacks - stock-based pay) / net income, capped at 100%';
 
-  const ebitda = ebit != null ? ebit + (latest(h, 'da') ?? 0) : null;
+  const ebitda = ebit != null ? ebit + (cur('da') ?? 0) : null;
   src.exitMultiple = 'Default 12x EBITDA';
   void ebitda;
 
@@ -319,6 +332,7 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
 
   const m = margin0 ?? 0.1;
   const a: Assumptions = {
+    basis,
     price: mkt.price ?? null,
     rf,
     erp,
@@ -344,7 +358,7 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
     sti,
     debt,
     shares,
-    equity0: latest(h, 'equity') != null ? latest(h, 'equity')! / M : null,
+    equity0: cur('equity') != null ? cur('equity')! / M : null,
     ni0: ni != null ? ni / M : null,
     dps0,
     payout,
@@ -371,7 +385,10 @@ export function defaultAssumptions(h: Historicals, mkt: MarketContext): { a: Ass
 /** The Inputs sheet: one named cell per assumption, plus derived cost-of-capital formulas. */
 export function inputDefs(a: Assumptions, src: Sources, h: Historicals): InputDef[] {
   const ebit0 = a.rev0 != null && a.margin0 != null ? a.rev0 * a.margin0 : null;
-  const da0 = latest(h, 'da');
+  const da0 = current(h, 'da', a.basis);
+  const ttm = a.basis === 'ttm' && h.ttm;
+  const per = ttm ? 'last 12 months' : 'last fiscal year';
+  const from = ttm ? `10-K rolled forward with 10-Qs to ${h.ttm!.end}` : 'Latest 10-K';
   const I = (key: string, label: string, value: InputDef['value'], fmt: InputDef['fmt'], group: InputDef['group'], source = '', note?: string): InputDef => ({
     key,
     label,
@@ -390,12 +407,12 @@ export function inputDefs(a: Assumptions, src: Sources, h: Historicals): InputDe
     I('sti', 'Short-term investments ($M)', a.sti, 'usdm', 'Company', src.sti),
     I('debt', 'Total debt ($M)', a.debt, 'usdm', 'Company', src.debt),
     I('net_debt', 'Net debt ($M)', '=debt-cash-sti', 'usdm', 'Company', 'Debt - cash - short-term investments'),
-    I('rev_0', 'Revenue, last fiscal year ($M)', a.rev0, 'usdm', 'Company', 'Latest 10-K'),
-    I('ebit_0', 'Operating income, last fiscal year ($M)', ebit0, 'usdm', 'Company', 'Latest 10-K'),
-    I('da_0', 'D&A, last fiscal year ($M)', da0 != null ? da0 / 1e6 : null, 'usdm', 'Company', 'Latest 10-K'),
-    I('ni_0', 'Net income, last fiscal year ($M)', a.ni0, 'usdm', 'Company', 'Latest 10-K'),
-    I('equity_0', 'Book equity ($M)', a.equity0, 'usdm', 'Company', 'Latest 10-K'),
-    I('dps_0', 'Dividend per share, last fiscal year', a.dps0, 'usd', 'Company', src.dps0),
+    I('rev_0', `Revenue, ${per} ($M)`, a.rev0, 'usdm', 'Company', from),
+    I('ebit_0', `Operating income, ${per} ($M)`, ebit0, 'usdm', 'Company', from),
+    I('da_0', `D&A, ${per} ($M)`, da0 != null ? da0 / 1e6 : null, 'usdm', 'Company', from),
+    I('ni_0', `Net income, ${per} ($M)`, a.ni0, 'usdm', 'Company', from),
+    I('equity_0', 'Book equity ($M)', a.equity0, 'usdm', 'Company', ttm ? `10-Q balance sheet, ${h.ttm!.end}` : 'Latest 10-K'),
+    I('dps_0', `Dividend per share, ${per}`, a.dps0, 'usd', 'Company', src.dps0),
     I('tp_ratio', 'Total payout ratio (dividends + net buybacks)', a.totalPayout, 'pct', 'Company', src.totalPayout),
     I('tax', 'Tax rate', a.tax, 'pct', 'Cost of capital', src.tax),
     I('beta_l', 'Levered beta', a.beta, 'beta', 'Cost of capital', src.beta),
@@ -407,7 +424,7 @@ export function inputDefs(a: Assumptions, src: Sources, h: Historicals): InputDe
     I('wacc', 'WACC', '=(1-w_debt)*re+w_debt*rd*(1-tax)', 'pct', 'Cost of capital', 'E/V × re + D/V × rd × (1 - t)'),
     I('beta_u', 'Unlevered beta (Hamada)', '=beta_l/(1+(1-tax)*de_ratio)', 'beta', 'Cost of capital', 'β / (1 + (1 - t) D/E)'),
     I('ru', 'Unlevered cost of equity', '=rf+beta_u*erp', 'pct', 'Cost of capital', 'rf + βu × ERP'),
-    I('g_stage1', a.financial ? 'Book equity growth, years 1-5' : 'Revenue growth, latest year (the forecast starts here)', a.g1, 'pct', 'Forecast', src.g1),
+    I('g_stage1', a.financial ? 'Book equity growth, years 1-5' : `Revenue growth, ${ttm ? 'last 12 months' : 'latest year'} (the forecast starts here)`, a.g1, 'pct', 'Forecast', src.g1),
     I('g_typical', 'Typical company growth, year 1', a.gTypical ?? GROWTH_CAL.typical, 'pct', 'Forecast', 'Median S&P 500 revenue growth, 2017-2025; slides to terminal growth by year 10'),
     ...((a.growthMode ?? 'research') === 'research'
       ? [

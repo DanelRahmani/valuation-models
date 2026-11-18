@@ -40,6 +40,20 @@ export interface Historicals {
   missing: LineItem[];
   /** Most recent cover-page share count from any 10-K or 10-Q (picks up splits and buybacks after the fiscal year). */
   latestShares?: FactValue | null;
+  /** Trailing twelve months to the latest 10-Q (null when the latest filing is the 10-K or 10-Q data are missing). */
+  ttm?: TtmData | null;
+}
+
+export interface TtmData {
+  /** First and last day of the trailing twelve months. */
+  start: string;
+  end: string;
+  /** End of the fiscal year (10-K) the figures roll forward from. */
+  fyEnd: string;
+  /** Flows over the twelve months; balance-sheet items at `end`. */
+  items: Partial<Record<LineItem, FactValue | null>>;
+  /** The same window a year earlier, for growth (null when the older 10-Qs are missing). */
+  prior: Partial<Record<LineItem, FactValue | null>> | null;
 }
 
 /** Compact companyfacts: only mapped tags, only annual 10-K rows. */

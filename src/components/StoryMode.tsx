@@ -64,6 +64,8 @@ interface Story {
   revenue: (number | null)[];
   margin: (number | null)[];
   baseYear: number;
+  /** True when the forecast starts from the trailing twelve months rather than the last fiscal year. */
+  ttm: boolean;
   f: Record<string, (number | null)[]>;
   wacc: number;
   g1: number;
@@ -114,7 +116,9 @@ export function buildStory(name: string, h: Historicals, out: RunOutput): Story 
     years,
     revenue: rev,
     margin: rev.map((r, i) => (r && ebit[i] != null ? ebit[i]! / r : null)),
-    baseYear: h.years.at(-1)!,
+    // On the trailing-twelve-month basis, year 1 is the twelve months after the latest 10-Q.
+    baseYear: out.wb.sheets[0]?.columns[0] === 'TTM' && h.ttm ? Number(h.ttm.end.slice(0, 4)) : h.years.at(-1)!,
+    ttm: out.wb.sheets[0]?.columns[0] === 'TTM',
     f,
     wacc: I.wacc,
     g1: I.g_stage1 ?? 0,
@@ -489,7 +493,9 @@ function Forecast({ s, phase }: { s: Story; phase: number }) {
       })}
       {phase === 0 && (
         <text x={70} y={TOP} className={`${label} fade-up`} style={{ animationDelay: '900ms' }}>
-          free cash flow, FY{String(s.baseYear + 1).slice(2)}–FY{String(s.baseYear + n).slice(2)}
+          {s.ttm
+            ? `free cash flow, next ${n} years`
+            : `free cash flow, FY${String(s.baseYear + 1).slice(2)}–FY${String(s.baseYear + n).slice(2)}`}
         </text>
       )}
       {showTv && (
@@ -711,7 +717,7 @@ function Caption({ s, step, reduced }: { s: Story; step: number; reduced: boolea
     case 2:
       return (
         <>
-          Growth starts from last year&apos;s {pct(s.g1)} and fades as fast growers&apos; growth usually does, averaging {pct(s.avg5)} over five years and reaching {pct(s.gT)} by year 10 ({s.pathName}). These are the cash flows the business should produce.
+          Growth starts from {s.ttm ? 'the last twelve months’' : 'last year’s'} {pct(s.g1)} and fades as fast growers&apos; growth usually does, averaging {pct(s.avg5)} over five years and reaching {pct(s.gT)} by year 10 ({s.pathName}). These are the cash flows the business should produce.
         </>
       );
     case 3:

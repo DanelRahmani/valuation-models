@@ -3,6 +3,7 @@
  * into the URL, so a link reopens exactly the scenario on screen. Only scalar assumptions are encoded.
  */
 import type { Assumptions } from './finance/assumptions';
+import type { Basis } from './finance/extract';
 
 export type BetaChoice = 'regression' | 'blume' | 'industry' | 'manual' | 'upload';
 
@@ -48,9 +49,11 @@ const same = (a: number | null | undefined, b: number | null | undefined) =>
 /** Trim to 6 significant digits so links stay short and round-trip exactly enough. */
 const enc = (x: number | null) => (x == null ? '' : String(Number(x.toPrecision(6))));
 
-export function encodeShare(s: { ticker: string; beta: BetaChoice; defaultBeta: BetaChoice; simple: boolean; a: Assumptions; defaults: Assumptions }): string {
+/** basis: set to 'fy' only when the user chose the fiscal year over the default trailing twelve months. */
+export function encodeShare(s: { ticker: string; beta: BetaChoice; defaultBeta: BetaChoice; simple: boolean; a: Assumptions; defaults: Assumptions; basis?: Basis }): string {
   const p = new URLSearchParams();
   p.set('t', s.ticker);
+  if (s.basis === 'fy') p.set('basis', 'fy');
   if (s.beta !== s.defaultBeta && s.beta !== 'upload') p.set('beta', s.beta);
   if (s.simple) p.set('view', 'simple');
   if (s.a.terminalMethod !== s.defaults.terminalMethod) p.set('tv', s.a.terminalMethod);

@@ -3,7 +3,7 @@
  * comparison view and the home-page hero always agree.
  */
 import { defaultAssumptions, defaultBetaMethod, isFinancialFirm, type Assumptions, type Sources } from './finance/assumptions';
-import { extractHistoricals } from './finance/extract';
+import { extractHistoricals, type Basis } from './finance/extract';
 import { runAll, type RunOutput } from './finance/run';
 import type { CompanyFile, Historicals, IndustryRow, MarketFile } from './finance/types';
 import type { BetaChoice } from './share';
@@ -29,7 +29,7 @@ export interface Defaults {
 }
 
 /** Default assumptions for a company, with the beta set by the suggested method and Damodaran peer multiples. */
-export function companyDefaults(company: CompanyFile, market: MarketFile | null, h = extractHistoricals(company.facts)): Defaults {
+export function companyDefaults(company: CompanyFile, market: MarketFile | null, h = extractHistoricals(company.facts), basis: Basis = 'ttm'): Defaults {
   const ind = market?.industries.find((i) => i.name === company.industry);
   const { a, src } = defaultAssumptions(h, {
     price: company.price?.close ?? null,
@@ -40,7 +40,7 @@ export function companyDefaults(company: CompanyFile, market: MarketFile | null,
     industryFirms: ind?.firms ?? null,
     subIndustry: company.subIndustry ?? null,
     marketCap: company.marketCap ?? null,
-  });
+  }, basis);
   if (company.price) src.price = `Last close ${company.price.date} (Nasdaq)`;
   if (market) {
     src.rf = `10-year Treasury, ${market.rfDate} (${market.rfSource ?? 'FRED'})`;

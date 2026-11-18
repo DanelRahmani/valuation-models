@@ -132,7 +132,14 @@ function isTrimmed(x: unknown): x is TrimmedFacts {
   return !!x && typeof x === 'object' && 'tags' in x;
 }
 
-/** Reduce a full companyfacts JSON to the mapped tags: annual 10-K rows, plus 10-Q cover-page share counts. */
+/** 10-Q rows older than this (days before the newest 10-Q) are dropped: trailing twelve months a year ago needs three years. */
+const QUARTERLY_WINDOW = 3 * 366 + 20;
+
+/**
+ * Reduce a full companyfacts JSON to the mapped tags: annual 10-K rows (instants, and flows of about twelve months),
+ * plus, from 10-Qs of the last three years, balance-sheet instants and year-to-date flows (the longest period ending on
+ * each quarter date), from which trailing-twelve-month figures are built (see extractTtm).
+ */
 export function trimCompanyfacts(raw: unknown): TrimmedFacts {
   if (isTrimmed(raw)) return raw;
   const j = raw as { cik: number | string; entityName: string; facts: Record<string, Record<string, { units: Record<string, any[]> }>> };
@@ -144,20 +151,37 @@ export function trimCompanyfacts(raw: unknown): TrimmedFacts {
     if (!fact) continue;
     const unit = fact.units.USD ?? fact.units.shares ?? Object.values(fact.units)[0];
     if (!unit) continue;
-    const quarterlyOk = full === COVER_SHARES;
-    // Keep annual 10-K rows only: instants, or flows of roughly twelve months. One row per period, latest filing wins.
     const best = new Map<string, TrimmedRow>();
+    const quarterly: TrimmedRow[] = [];
     for (const r of unit) {
-      if (typeof r.form !== 'string' || !(r.form.startsWith('10-K') || (quarterlyOk && r.form.startsWith('10-Q')))) continue;
+      if (typeof r.form !== 'string') continue;
+      const row: TrimmedRow = { ...(r.start ? { start: r.start } : {}), end: r.end, val: r.val, filed: r.filed, form: r.form };
+      if (r.form.startsWith('10-Q')) {
+        if (!r.start || (days(r.start, r.end) >= 80 && days(r.start, r.end) <= 290)) quarterly.push(row);
+        continue;
+      }
+      if (!r.form.startsWith('10-K')) continue;
       if (r.start) {
         const len = days(r.start, r.end);
         if (len < 350 || len > 380) continue;
       }
+      // One row per period, latest filing wins.
       const key = `${r.start ?? ''}|${r.end}`;
       const prev = best.get(key);
-      if (!prev || r.filed > prev.filed) best.set(key, { ...(r.start ? { start: r.start } : {}), end: r.end, val: r.val, filed: r.filed, form: r.form });
+      if (!prev || r.filed > prev.filed) best.set(key, row);
     }
-    const rows = [...best.values()].sort((a, b) => a.end.localeCompare(b.end));
+    // 10-Q rows: instants, and per end date the longest flow (year to date; the three-month quarter is dropped).
+    const newest = quarterly.reduce((m, r) => (r.end > m ? r.end : m), '');
+    const ytd = new Map<string, TrimmedRow>();
+    for (const r of quarterly) {
+      // Cover-page share counts are kept for every year, as before (they date each year's share count).
+      if (full !== COVER_SHARES && days(r.end, newest) > QUARTERLY_WINDOW) continue;
+      const key = r.start ? `|${r.end}` : `${r.end}|i`;
+      const prev = ytd.get(key);
+      const len = (x: TrimmedRow) => (x.start ? days(x.start, x.end) : 0);
+      if (!prev || len(r) > len(prev) + 5 || (Math.abs(len(r) - len(prev)) <= 5 && r.filed > prev.filed)) ytd.set(key, r);
+    }
+    const rows = [...best.values(), ...ytd.values()].sort((a, b) => a.end.localeCompare(b.end));
     if (rows.length) tags[full] = rows;
   }
   return { cik: String(j.cik).padStart(10, '0'), name: j.entityName, tags };
@@ -407,10 +431,121 @@ export function extractHistoricals(raw: unknown, nYears = 10): Historicals {
     years.length ? impliedShares(years.at(-1)!) : null,
   );
 
-  return { cik: t.cik, name: t.name, years, yearEnds: years.map((y) => yearEnds.get(y)!), items, missing, latestShares };
+  const yearEndList = years.map((y) => yearEnds.get(y)!);
+  return { cik: t.cik, name: t.name, years, yearEnds: yearEndList, items, missing, latestShares, ttm: extractTtm(t, yearEndList, items) };
+}
+
+const near = (a: string, b: string, tol = 10) => Math.abs(days(a, b)) <= tol;
+const shiftYears = (d: string, n: number) => {
+  const x = new Date(d);
+  x.setUTCFullYear(x.getUTCFullYear() + n);
+  return x.toISOString().slice(0, 10);
+};
+const nextDay = (d: string) => new Date(Date.parse(d) + 86_400_000).toISOString().slice(0, 10);
+/** Weighted-average share counts are averages, not sums: the year-to-date figure stands for the period as it is. */
+const AVERAGE_TAGS = new Set(['WeightedAverageNumberOfDilutedSharesOutstanding']);
+
+/** The 10-Q year-to-date row for the fiscal year after `fyEnd`, ending near `end`. */
+function ytdRow(rows: TrimmedRow[], fyEnd: string, end: string): TrimmedRow | undefined {
+  let best: TrimmedRow | undefined;
+  for (const r of rows)
+    if (r.form.startsWith('10-Q') && r.start && near(r.start, nextDay(fyEnd)) && near(r.end, end) && (!best || r.filed > best.filed)) best = r;
+  return best;
+}
+
+/**
+ * Trailing-twelve-month facts for the year to `end`, rolled forward from the 10-K for the year to `fyEnd`:
+ * last fiscal year + year to date now - the same period a year earlier. Balance-sheet items are the 10-Q values at `end`.
+ * Rows come out shaped like 10-K rows, so extractHistoricals applies every annual rule (debt recipes, rebuilt operating
+ * income, D&A plus amortisation, net income chosen by EPS) to the trailing period too.
+ */
+function rollForward(t: TrimmedFacts, fyEnd: string, end: string, out: Record<string, TrimmedRow[]>): void {
+  const priorFyEnd = shiftYears(fyEnd, -1);
+  for (const [tag, rows] of Object.entries(t.tags)) {
+    if (tag === COVER_SHARES) continue;
+    const q = ytdRow(rows, fyEnd, end);
+    if (q) {
+      let val = q.val;
+      if (!AVERAGE_TAGS.has(tag)) {
+        const fy = rows.find((r) => r.form.startsWith('10-K') && r.start && near(r.end, fyEnd) && days(r.start, r.end) >= 350);
+        const prior = ytdRow(rows, priorFyEnd, shiftYears(q.end, -1));
+        if (!fy || !prior) continue;
+        val = fy.val + q.val - prior.val;
+      }
+      (out[tag] ??= []).push({ start: nextDay(shiftYears(end, -1)), end, val, filed: q.filed, form: '10-K' });
+      continue;
+    }
+    const inst = rows.filter((r) => !r.start && r.end === end).sort((a, b) => b.filed.localeCompare(a.filed))[0];
+    if (inst) (out[tag] ??= []).push({ end, val: inst.val, filed: inst.filed, form: '10-K' });
+  }
+}
+
+const TTM_ANCHORS = [...TAG_MAP.revenue, ...TAG_MAP.netIncome, ...TAG_MAP.cfo];
+
+/**
+ * Trailing twelve months to the latest 10-Q, plus the same window a year earlier (for growth). Null when the latest
+ * filing is the 10-K itself, when the 10-Q data needed is missing (older trimmed files, unusual fiscal calendars), or
+ * when the result looks like a data error (revenue under 40% or over 250% of the last fiscal year).
+ */
+export function extractTtm(t: TrimmedFacts, yearEnds: string[], annual: Historicals['items']): Historicals['ttm'] {
+  const fyEnd = yearEnds.at(-1);
+  if (!fyEnd) return null;
+  let end: string | null = null;
+  for (const tag of TTM_ANCHORS) {
+    const q = (t.tags[tag] ?? []).filter((r) => r.form.startsWith('10-Q') && r.start && near(r.start, nextDay(fyEnd)) && r.end > fyEnd);
+    for (const r of q) if (!end || r.end > end) end = r.end;
+  }
+  if (!end) return null;
+  const synth: Record<string, TrimmedRow[]> = {};
+  rollForward(t, fyEnd, end, synth);
+  const priorEnd = yearEnds.at(-2);
+  const priorTtmEnd = shiftYears(end, -1);
+  if (priorEnd) {
+    // The prior-year window ends on that year's quarter date, which can differ by a few days on 52/53-week calendars.
+    const priorRow = TTM_ANCHORS.flatMap((tag) => t.tags[tag] ?? []).find((r) => r.form.startsWith('10-Q') && r.start && near(r.start, nextDay(priorEnd)) && near(r.end, priorTtmEnd));
+    if (priorRow) rollForward(t, priorEnd, priorRow.end, synth);
+  }
+  for (const rows of Object.values(synth)) rows.sort((a, b) => a.end.localeCompare(b.end));
+  const h = extractHistoricals({ cik: t.cik, name: t.name, tags: synth }, 2);
+  if (h.years.at(-1) !== fyOf(end) || h.yearEnds.at(-1) !== end) return null;
+  const pick = (i: number) => {
+    const out: Partial<Record<LineItem, FactValue | null>> = {};
+    for (const k of Object.keys(TAG_MAP) as LineItem[]) {
+      const v = h.items[k]?.[i];
+      const how = INSTANT.has(k) ? `10-Q balance sheet, ${v?.end}` : 'last 12 months (10-K + 10-Q year to date - same period a year earlier)';
+      out[k] = v ? { ...v, tag: `${v.tag}, ${how}` } : null;
+    }
+    return out;
+  };
+  const items = pick(h.years.length - 1);
+  const prior = h.years.length === 2 && near(h.yearEnds[0], priorTtmEnd) ? pick(0) : null;
+  const rev = items.revenue?.value;
+  const revFy = annual.revenue?.at(-1)?.value;
+  if (rev != null && revFy && (rev / revFy < 0.4 || rev / revFy > 2.5)) return null;
+  // The headline lines must all roll forward, or the trailing period would mix windows: fall back to the fiscal year.
+  for (const k of ['revenue', 'netIncome', 'operatingIncome'] as LineItem[]) if (annual[k]?.at(-1) != null && items[k] == null) return null;
+  if (items.revenue == null && items.netIncome == null) return null;
+  return { start: nextDay(shiftYears(end, -1)), end, fyEnd, items, prior };
 }
 
 /** Value of an item in the latest fiscal year, or null. Older years never stand in: a stale figure is worse than a gap. */
 export function latest(h: Historicals, item: LineItem): number | null {
   return h.items[item]?.at(-1)?.value ?? null;
+}
+
+/** Which period the model starts from: the trailing twelve months (default when 10-Q data exist) or the last fiscal year. */
+export type Basis = 'ttm' | 'fy';
+
+/** Latest figure on the chosen basis: trailing twelve months when available, else the last fiscal year. */
+export function current(h: Historicals, item: LineItem, basis: Basis = 'ttm'): number | null {
+  return currentFact(h, item, basis)?.value ?? null;
+}
+
+export function currentFact(h: Historicals, item: LineItem, basis: Basis = 'ttm'): FactValue | null {
+  const fy = h.items[item]?.at(-1) ?? null;
+  if (basis !== 'ttm' || !h.ttm) return fy;
+  // A line the 10-Qs do not tag (debt under a recipe only the 10-K uses, D&A at some filers) keeps its 10-K value
+  // rather than reading as zero.
+  const t = h.ttm.items[item];
+  return t ?? (fy ? { ...fy, tag: `${fy.tag} (latest 10-K: not tagged in the 10-Qs)` } : null);
 }

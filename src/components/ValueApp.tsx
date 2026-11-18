@@ -1,13 +1,13 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { defaultAssumptions, defaultBetaMethod, MIN_BETA_R2, MIN_INDUSTRY_FIRMS, type Assumptions, type Sources } from '@/lib/finance/assumptions';
 import { evaluate, type ModelId } from '@/lib/finance/calcsheet';
-import { extractHistoricals } from '@/lib/finance/extract';
+import { extractHistoricals, type Basis } from '@/lib/finance/extract';
 import { runAll } from '@/lib/finance/run';
 import { LINE_LABELS, type CompanyFile, type Historicals, type IndustryRow, type MarketFile, type SnapshotBeta } from '@/lib/finance/types';
-import { fmt } from '@/lib/format';
+import { fmt, fmtDate } from '@/lib/format';
 import { MODEL_NOTES } from '@/content/modelNotes';
 import { ModelCard } from './ModelCard';
 import { FootballField, HistoryChart, SensitivityGrid, Tornado, type FieldRow } from './Charts';
@@ -70,7 +70,8 @@ export default function ValueApp() {
     );
   if (!loaded) return <p className="py-24 text-muted">Loading filings…</p>;
   if (!loaded.h) return <UploadCompany market={loaded.market} onLoaded={(h) => setLoaded({ ...loaded, h })} />;
-  return <Valuation key={loaded.ticker + loaded.h.cik} {...loaded} />;
+  // Switching between the trailing twelve months and the last fiscal year rebuilds the defaults; the link keeps any edits.
+  return <Valuation key={loaded.ticker + loaded.h.cik + (params.get('basis') ?? '')} {...loaded} />;
 }
 
 function UploadCompany({ market, onLoaded }: { market: MarketFile | null; onLoaded: (h: Historicals) => void }) {
@@ -123,6 +124,14 @@ const betaFrom = (u: UploadedBeta): SnapshotBeta => ({ ...u.stats, source: 'uplo
 
 function Valuation({ ticker, h, company, market }: Loaded) {
   const params = useSearchParams();
+  const router = useRouter();
+  const basisWanted: Basis = params.get('basis') === 'fy' ? 'fy' : 'ttm';
+  const switchBasis = (b: Basis) => {
+    const p = new URLSearchParams(window.location.search);
+    if (b === 'fy') p.set('basis', 'fy');
+    else p.delete('basis');
+    router.replace(`${window.location.pathname}?${p.toString()}`, { scroll: false });
+  };
   const shared = useMemo(() => decodeShare(params), []); // eslint-disable-line react-hooks/exhaustive-deps
   const industries = market?.industries ?? [];
   const [industry, setIndustry] = useState<string>(company?.industry ?? '');
@@ -145,7 +154,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
       industryFirms: ind?.firms ?? null,
       subIndustry: company?.subIndustry ?? null,
       marketCap: company?.marketCap ?? null,
-    });
+    }, basisWanted);
     if (company?.price) src.price = `Last close ${company.price.date} (Nasdaq)`;
     if (market) {
       src.rf = `10-year Treasury, ${market.rfDate} (${market.rfSource ?? 'FRED'})`;
@@ -232,7 +241,9 @@ function Valuation({ ticker, h, company, market }: Loaded) {
   }, [out, tornadoInputs, a.financial]);
 
   // Keep the address bar in step with the scenario, so it can be shared.
-  const query = ticker ? encodeShare({ ticker, beta: betaChoice, defaultBeta: suggestedBeta, simple, a, defaults: initial.a }) : '';
+  const query = ticker
+    ? encodeShare({ ticker, beta: betaChoice, defaultBeta: suggestedBeta, simple, a, defaults: initial.a, basis: h.ttm && basisWanted === 'fy' ? 'fy' : undefined })
+    : '';
   useEffect(() => {
     if (!ticker) return;
     const url = `${window.location.pathname}?${query}`;
@@ -278,9 +289,41 @@ function Valuation({ ticker, h, company, market }: Loaded) {
           <div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <Label>
-                {ticker ? `${ticker} · ` : ''}CIK {h.cik} · FY{h.years.at(-1)} 10-K{company ? ` · ${company.sector}` : ''}
+                {ticker ? `${ticker} · ` : ''}CIK {h.cik} · {a.basis === 'ttm' && h.ttm ? `TTM to ${fmtDate(h.ttm.end)} (10-K + 10-Q)` : `FY${h.years.at(-1)} 10-K`}
+                {company ? ` · ${company.sector}` : ''}
               </Label>
               <QaBadge ticker={ticker} />
+            </div>
+            <div className="mt-3 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-muted">Figures:</span>
+                <div role="group" aria-label="Basis of the figures" className="inline-flex rounded-full border border-seam p-0.5">
+                  {(
+                    [
+                      ['ttm', 'TTM · trailing 12 months (default)'],
+                      ['fy', `10-K · fiscal year ${h.years.at(-1)}`],
+                    ] as const
+                  ).map(([b, label]) => (
+                    <button
+                      key={b}
+                      type="button"
+                      aria-pressed={a.basis === b}
+                      disabled={b === 'ttm' && !h.ttm}
+                      onClick={() => a.basis !== b && switchBasis(b)}
+                      className={`rounded-full px-3 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${a.basis === b ? 'bg-accent text-bg' : 'text-muted hover:text-ink'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="mt-1.5 max-w-xl text-muted">
+                {!h.ttm
+                  ? `The latest filing is the FY${h.years.at(-1)} 10-K: there is no newer quarter yet, so the figures are the fiscal year.`
+                  : a.basis === 'ttm'
+                    ? `Trailing twelve months to ${fmtDate(h.ttm.end)}: the FY${h.years.at(-1)} 10-K plus the 10-Q year to date, minus the same period a year earlier, with balances from the 10-Q. This is how Yahoo Finance and Bloomberg report.`
+                    : `Fiscal year ${h.years.at(-1)} as reported in the audited 10-K, ending ${fmtDate(h.yearEnds.at(-1)!)}. Newer quarters are left out.`}
+              </p>
             </div>
             <h1 className="mt-4 font-serif text-5xl italic leading-[1.02] sm:text-6xl">{prettyName(h.name)}</h1>
             <div aria-hidden className="mt-5 h-px w-40 bg-accent/70" />
@@ -557,7 +600,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
               </label>
             )}
             <NumberField
-              label={a.financial ? 'Book equity growth, years 1-5' : 'Revenue growth, latest year'}
+              label={a.financial ? 'Book equity growth, years 1-5' : a.basis === 'ttm' ? 'Revenue growth, last 12 months' : 'Revenue growth, latest year'}
               value={a.g1}
               fmt="pct"
               source={src.g1}
@@ -818,7 +861,9 @@ function HistoricalsTable({ h }: { h: Historicals }) {
   return (
     <section>
       <h2 className="font-serif text-2xl">From the filings</h2>
-      <p className="mt-1 text-xs text-muted">$ millions, fiscal years from 10-K filings. Hover a number for its XBRL tag.</p>
+      <p className="mt-1 text-xs text-muted">
+        $ millions, fiscal years from 10-K filings{h.ttm ? `; the last column is the 12 months to ${fmtDate(h.ttm.end)} (10-K + 10-Q year to date - the same period a year earlier, balances from the 10-Q)` : ''}. Hover a number for its XBRL tag.
+      </p>
       <div className="overflow-x-auto">
         <table className="num mt-4 w-full min-w-[560px] text-[0.8125rem]">
           <thead>
@@ -829,6 +874,7 @@ function HistoricalsTable({ h }: { h: Historicals }) {
                   FY{y}
                 </th>
               ))}
+              {h.ttm && <th className="px-2 py-1.5 text-right font-normal text-accent">TTM</th>}
             </tr>
           </thead>
           <tbody>
@@ -842,6 +888,15 @@ function HistoricalsTable({ h }: { h: Historicals }) {
                       {v ? (v.value / 1e6).toLocaleString('en-US', { maximumFractionDigits: 0 }) : '-'}
                     </td>
                   ))}
+                  {h.ttm &&
+                    (() => {
+                      const v = h.ttm.items[k];
+                      return (
+                        <td className="px-2 py-1.5 text-right text-accent" title={v ? `${v.tag}, period ending ${v.end}, filed ${v.filed}` : 'Not in the 10-Q data'}>
+                          {v ? (v.value / 1e6).toLocaleString('en-US', { maximumFractionDigits: 0 }) : '-'}
+                        </td>
+                      );
+                    })()}
                 </tr>
               );
             })}
