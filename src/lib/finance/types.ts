@@ -42,6 +42,8 @@ export interface Historicals {
   latestShares?: FactValue | null;
   /** Trailing twelve months to the latest 10-Q (null when the latest filing is the 10-K or 10-Q data are missing). */
   ttm?: TtmData | null;
+  /** Why a newer 10-Q was not used for the trailing twelve months (it restates earlier periods), for the page to say. */
+  ttmSkipped?: string | null;
 }
 
 export interface TtmData {
