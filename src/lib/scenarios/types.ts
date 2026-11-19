@@ -21,7 +21,7 @@ export type AssumptionLever =
   | 'rf'
   | 'exitMultiple'
   | 'tax'
-  | 'shares';
+  | 'newShares';
 
 /** Levers that only exist in scenarios and compile to per-year adjustments. */
 export type VirtualLever =
@@ -112,10 +112,10 @@ export const LEVERS: Record<Lever, LeverMeta> = {
   erp: { label: 'Equity risk premium', group: 'Risk and end value', fmt: 'pct', op: 'add', min: 0, max: 0.15, financial: true },
   exitMultiple: { label: 'Exit EV/EBITDA (exit method only)', group: 'Risk and end value', fmt: 'x', op: 'scale', min: 1, max: 60, financial: false },
   tax: { label: 'Tax rate', group: 'Risk and end value', fmt: 'pct', op: 'add', min: 0, max: 0.5, financial: true },
-  shares: { label: 'Shares outstanding (dilution)', group: 'Shares', fmt: 'shares', op: 'scale', min: 0.001, max: 1e7, financial: true, help: 'Multiply by 1.05 for 5% more shares from stock pay or conversions; every per-share value divides by it.' },
+  newShares: { label: 'New shares from stock pay or conversions (M)', group: 'Shares', fmt: 'shares', op: 'add', min: 0, max: 1e6, financial: true, help: 'Millions of extra shares (dilution). Every per-share value divides by today’s shares plus these.' },
 };
 
-export const ASSUMPTION_LEVERS: AssumptionLever[] = ['g1', 'gDecay', 'gTypical', 'gT', 'marginTarget', 'marginYears', 'capexPct', 'daPct', 'nwcPct', 'beta', 'erp', 'rd', 'rf', 'exitMultiple', 'tax', 'shares'];
+export const ASSUMPTION_LEVERS: AssumptionLever[] = ['g1', 'gDecay', 'gTypical', 'gT', 'marginTarget', 'marginYears', 'capexPct', 'daPct', 'nwcPct', 'beta', 'erp', 'rd', 'rf', 'exitMultiple', 'tax', 'newShares'];
 /** Own keys only: a hand-edited 'constructor' or 'toString' must not pass as a lever. */
 export const isLever = (l: unknown): l is Lever => typeof l === 'string' && Object.hasOwn(LEVERS, l);
 export const isPathLever = (l: unknown): l is PathLever => typeof l === 'string' && Object.hasOwn(PATH_META, l);

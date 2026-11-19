@@ -103,6 +103,14 @@ export const ADJUST_FIELDS = [
 ] as const;
 export type AdjustField = (typeof ADJUST_FIELDS)[number];
 
+/**
+ * New shares (stock pay, conversions) enter the per-share values when they can matter: in AI mode, when set, or while a
+ * scenario is active. At the default of 0 every value is unchanged.
+ */
+export const hasNewShares = (a: Assumptions) => a.aiMode || a.newShares !== 0 || !!a.adjust;
+/** The share count the per-share rows divide by. */
+export const shareCount = (a: Assumptions) => (hasNewShares(a) ? '(shares+new_shares)' : 'shares');
+
 /** Where each default came from, for the source badges. */
 export type Sources = Partial<Record<keyof Assumptions, string>>;
 
@@ -503,8 +511,8 @@ export function inputDefs(a: Assumptions, src: Sources, h: Historicals): InputDe
     I('roe_peer', 'Peer return on equity', a.peers.roe ?? null, 'pct', 'Peers', src.peers ?? 'You', 'Scales the peer P/B to this company’s return on equity'),
     I('peg_peer', 'Peer PEG', a.peers.peg, 'x', 'Peers', src.peers ?? 'You'),
   ];
+  if (hasNewShares(a)) defs.push(I('new_shares', 'New shares from conversions / SBC (M)', a.newShares, 'shares', 'Scenarios', a.aiMode ? 'You' : 'Scenario'));
   if (a.aiMode) {
-    defs.push(I('new_shares', 'New shares from conversions / SBC (M)', a.newShares, 'shares', 'Scenarios', 'You'));
     for (const s of ['bear', 'base', 'bull'] as const) {
       const sc = a.scenarios[s];
       const name = s[0].toUpperCase() + s.slice(1);

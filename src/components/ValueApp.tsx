@@ -224,7 +224,8 @@ function Valuation({ ticker, h, company, market }: Loaded) {
   /** The assumptions the page runs on: the base case, or the base case with the active scenario on top. */
   const aEff = applied?.a ?? a;
 
-  const out = useMemo(() => runAll(h, aEff, src), [h, aEff, src]);
+  const marginFromScenario = !!applied?.diffs.some((d) => d.lever === 'marginTarget' || d.lever === 'marginYears' || d.lever === 'shockMarginDrop');
+  const out = useMemo(() => runAll(h, aEff, src, { marginFromScenario }), [h, aEff, src, marginFromScenario]);
   /** Base-case results, kept next to the scenario's so every card can show both. */
   const baseResults = useMemo(() => (active ? quickRun(h, a, src).results : out.results), [active, h, a, src, out]);
   const basePs = (id: ModelId) => baseResults.find((r) => r.id === id && r.status === 'ok')?.perShare ?? null;
@@ -255,7 +256,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
     return ok ? tornado(out.wb, tornadoInputs, a.financial) : [];
   }, [out, tornadoInputs, a.financial]);
 
-  // Keep the address bar in step with the scenario, so it can be shared.
+  // Keep the address bar in step with the assumptions on screen, so the valuation can be shared (saved scenarios are not).
   const query = ticker
     ? encodeShare({ ticker, beta: betaChoice, defaultBeta: suggestedBeta, simple, a, defaults: initial.a, basis: h.ttm && basisWanted === 'fy' ? 'fy' : undefined })
     : '';
@@ -448,7 +449,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
               aria-live="polite"
               title={active ? 'Share links carry the base case only; saved scenarios stay in this browser.' : undefined}
             >
-              {copied ? 'Link copied' : active ? 'Copy link (base case)' : 'Copy link to this scenario'}
+              {copied ? 'Link copied' : active ? 'Copy link (base case)' : 'Copy link to this valuation'}
             </button>
           )}
         </div>

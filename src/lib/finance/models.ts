@@ -162,7 +162,7 @@ export function fcffSheet(a: Assumptions, baseYear: Base, o: FcffOpts): SheetDef
   return { id: o.id, name: o.name, title: o.title, columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
 }
 
-export function fcfeSheet(baseYear: Base, ratePath = false): SheetDef {
+export function fcfeSheet(baseYear: Base, ratePath = false, sh = 'shares'): SheetDef {
   const rows: RowDef[] = [
     { key: 'ebit', label: 'Operating income (from FCFF)', fmt: 'usdm', cells: each((t) => `=@FCFF.ebit[${t}]`) },
     { key: 'interest', label: '- Interest (debt × cost of debt)', fmt: 'usdm', cells: each(() => '=debt*rd') },
@@ -186,12 +186,12 @@ export function fcfeSheet(baseYear: Base, ratePath = false): SheetDef {
     { key: 'tv', label: 'Terminal value (Gordon growth)', fmt: 'usdm', cells: atN(`=@fcfe[${N}]*(1+g_terminal)/(re-g_terminal)`) },
     { key: 'pv_tv', label: 'Present value of terminal value', fmt: 'usdm', cells: atN(`=@tv[${N}]*@df[${N}]`) },
     { key: 'equity', label: 'Equity value (+ cash and investments)', fmt: 'usdm', emphasis: true, cells: at0(`=SUM(@pv[1]:@pv[${N}])+@pv_tv[${N}]+cash+sti`) },
-    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0('=@equity[0]/shares') },
+    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0(`=@equity[0]/${sh}`) },
   ];
   return { id: 'fcfe', name: 'FCFE', title: 'Free cash flow to equity', columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
 }
 
-export function apvSheet(baseYear: Base, ratePath = false): SheetDef {
+export function apvSheet(baseYear: Base, ratePath = false, sh = 'shares'): SheetDef {
   const rows: RowDef[] = [
     { key: 'fcff', label: 'Free cash flow to the firm (from FCFF)', fmt: 'usdm', cells: each((t) => `=@FCFF.fcff[${t}]`) },
     { key: 'df', label: 'Discount factor at unlevered cost of equity', fmt: 'num', cells: ratePath ? pathDf('ru') : each((t) => `=1/(1+ru)^${t}`) },
@@ -208,12 +208,12 @@ export function apvSheet(baseYear: Base, ratePath = false): SheetDef {
     },
     { key: 'apv', label: 'Adjusted present value (EV)', fmt: 'usdm', emphasis: true, cells: at0('=@vu[0]+@shield[0]') },
     { key: 'equity', label: '- Net debt (+ net cash) = equity value', fmt: 'usdm', cells: at0('=@apv[0]-net_debt') },
-    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0('=@equity[0]/shares') },
+    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0(`=@equity[0]/${sh}`) },
   ];
   return { id: 'apv', name: 'APV', title: 'Adjusted present value', columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
 }
 
-export function riSheet(baseYear: Base, ratePath = false): SheetDef {
+export function riSheet(baseYear: Base, ratePath = false, sh = 'shares'): SheetDef {
   const rows: RowDef[] = [
     { key: 'ni', label: 'Net income (from FCFE)', fmt: 'usdm', cells: each((t) => `=@FCFE.ni[${t}]`) },
     {
@@ -243,7 +243,7 @@ export function riSheet(baseYear: Base, ratePath = false): SheetDef {
       emphasis: true,
       cells: at0(`=@book[0]+SUM(@pv[1]:@pv[${N}])+@pv_tv[${N}]+cash+sti`),
     },
-    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0('=@equity[0]/shares') },
+    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0(`=@equity[0]/${sh}`) },
   ];
   return { id: 'ri', name: 'ResidualIncome', title: 'Residual income', columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
 }
@@ -252,7 +252,7 @@ export function riSheet(baseYear: Base, ratePath = false): SheetDef {
  * Residual income for banks and insurers: book equity is the operating base, so it grows with the growth path and
  * earns the return on equity. Value = book + PV of (ROE - cost of equity) × opening book.
  */
-export function riFinancialSheet(baseYear: Base, ratePath = false): SheetDef {
+export function riFinancialSheet(baseYear: Base, ratePath = false, sh = 'shares'): SheetDef {
   const rows: RowDef[] = [
     { key: 'growth', label: 'Book equity growth', fmt: 'pct', cells: each(growth('g_stage1')) },
     { key: 'book', label: 'Book equity, end of year', fmt: 'usdm', cells: ['=equity_0', ...each((t) => `=@book[${t - 1}]*(1+@growth[${t}])`).slice(1)] },
@@ -278,7 +278,7 @@ export function riFinancialSheet(baseYear: Base, ratePath = false): SheetDef {
     { key: 'tv', label: 'Terminal value of residual income', fmt: 'usdm', cells: atN(`=@ri[${N}]*(1+g_terminal)/(re-g_terminal)`) },
     { key: 'pv_tv', label: 'Present value of terminal value', fmt: 'usdm', cells: atN(`=@tv[${N}]*@df[${N}]`) },
     { key: 'equity', label: 'Book equity + PV of residual income', fmt: 'usdm', emphasis: true, cells: at0(`=@book[0]+SUM(@pv[1]:@pv[${N}])+@pv_tv[${N}]`) },
-    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0('=@equity[0]/shares') },
+    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0(`=@equity[0]/${sh}`) },
   ];
   return { id: 'ri', name: 'ResidualIncome', title: 'Residual income (financial firm)', columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
 }
@@ -340,7 +340,7 @@ export function ddmSheets(): SheetDef[] {
  * growth, when the payout rises to what a mature company can afford (1 - g / re). Discounted at the cost of equity and
  * divided by today's shares, so buybacks are not double counted.
  */
-export function totalPayoutSheet(): SheetDef {
+export function totalPayoutSheet(sh = 'shares'): SheetDef {
   const yrs = [`Now`, ...Array.from({ length: HIGH }, (_, i) => `Year ${i + 1}`)];
   const e = (f: (t: number) => string) => Array.from({ length: HIGH + 1 }, (_, t) => (t === 0 ? null : f(t)));
   return {
@@ -367,7 +367,7 @@ export function totalPayoutSheet(): SheetDef {
         cells: Array.from({ length: HIGH + 1 }, (_, t) => (t === HIGH ? `=@ni[${HIGH}]*(1+g_terminal)*@tv_payout[${HIGH}]/(re-g_terminal)` : null)),
       },
       { key: 'equity', label: 'Equity value', fmt: 'usdm', cells: [`=SUM(@pv[1]:@pv[${HIGH}])+@tv[${HIGH}]/(1+re)^${HIGH}`] },
-      { key: 'per_share', label: 'Value per share = equity value / shares', fmt: 'usd', emphasis: true, cells: ['=@equity[0]/shares'] },
+      { key: 'per_share', label: 'Value per share = equity value / shares', fmt: 'usd', emphasis: true, cells: [`=@equity[0]/${sh}`] },
     ],
     result: { row: 'per_share', col: 0 },
     status: 'ok',

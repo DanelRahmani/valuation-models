@@ -30,7 +30,9 @@ export function prepareScenarioExport(h: Historicals, base: Assumptions, src: So
   const applied = scenarios.map((s) => applyScenario(base, s).a);
   const fields = ADJUST_FIELDS.filter((f) => applied.some((a) => a.adjust?.[f]));
   // The workbook discounts a rate path as if the cost of debt follows it; a scenario that says otherwise is scaled to match.
-  const aU: Assumptions = { ...base, adjust: fields.length ? { ...neutralAdjust(base, fields), rdFollowsRf: true } : undefined };
+  // An (empty) adjust also puts the new-shares input in the workbook, so a dilution scenario can switch it.
+  const dilution = applied.some((a) => a.newShares !== base.newShares);
+  const aU: Assumptions = { ...base, adjust: fields.length || dilution ? { ...neutralAdjust(base, fields), rdFollowsRf: true } : undefined };
   const baseRun = quickRun(h, aU, src);
   const runs = applied.map((a) => quickRun(h, a, src));
   const names = ['Base case', ...scenarios.map((s, i) => uniqueName(s.name, i))];

@@ -1,4 +1,4 @@
-import { inputDefs, type Assumptions, type Sources } from './assumptions';
+import { inputDefs, shareCount, type Assumptions, type Sources } from './assumptions';
 import { evaluate, resultOf, type ModelId, type SheetDef, type Values, type Workbook } from './calcsheet';
 import { current } from './extract';
 import { type Base, apvSheet, ddmSheets, totalPayoutSheet, fcfeSheet, fcffSheet, multiplesSheet, riFinancialSheet, riSheet, scenarioSheets } from './models';
@@ -29,12 +29,12 @@ export function buildWorkbook(h: Historicals, a: Assumptions, src: Sources): Wor
   const ebitda0 = a.rev0 != null && a.margin0 != null ? a.rev0 * a.margin0 + (da0 ?? 0) / 1e6 : null;
   const rp = !!a.adjust?.rfAdd;
   const sheets: SheetDef[] = [
-    fcffSheet(a, baseYear, { id: 'fcff', name: 'FCFF', title: 'Discounted free cash flow to the firm', g1: 'g_stage1', margin: 'margin_target', capex: 'capex_pct', shares: 'shares' }),
-    fcfeSheet(baseYear, rp),
-    apvSheet(baseYear, rp),
-    a.financial ? riFinancialSheet(baseYear, rp) : riSheet(baseYear, rp),
+    fcffSheet(a, baseYear, { id: 'fcff', name: 'FCFF', title: 'Discounted free cash flow to the firm', g1: 'g_stage1', margin: 'margin_target', capex: 'capex_pct', shares: shareCount(a) }),
+    fcfeSheet(baseYear, rp, shareCount(a)),
+    apvSheet(baseYear, rp, shareCount(a)),
+    a.financial ? riFinancialSheet(baseYear, rp, shareCount(a)) : riSheet(baseYear, rp, shareCount(a)),
     ...ddmSheets(),
-    totalPayoutSheet(),
+    totalPayoutSheet(shareCount(a)),
     multiplesSheet(a, ebitda0),
   ];
   if (a.aiMode) sheets.push(...scenarioSheets(a, baseYear));
@@ -234,7 +234,8 @@ function sensitivity(wb: Workbook, v: Values): RunOutput['sensitivity'] {
   return { waccs, growths, grid };
 }
 
-export function runAll(h: Historicals, a: Assumptions, src: Sources): RunOutput {
+/** marginFromScenario: the active scenario sets the margin, so the note about holding the base margin for ever is not shown. */
+export function runAll(h: Historicals, a: Assumptions, src: Sources, opts: { marginFromScenario?: boolean } = {}): RunOutput {
   const wb = buildWorkbook(h, a, src);
   const values = evaluate(wb);
   const warnings = judge(wb, values, a);
@@ -249,7 +250,8 @@ export function runAll(h: Historicals, a: Assumptions, src: Sources): RunOutput 
     );
   // A margin far above the industry is held for ever by default. Say so: profitability usually reverts (Fama & French).
   const peerM = a.peers.margin;
-  if (!a.financial && peerM != null && a.marginTarget != null && a.marginTarget - peerM > MARGIN_GAP_NOTE)
+  const scenarioMargin = opts.marginFromScenario || !!a.adjust?.marginAdd || !!a.adjust?.marginSetW;
+  if (!scenarioMargin && !a.financial && peerM != null && a.marginTarget != null && a.marginTarget - peerM > MARGIN_GAP_NOTE)
     warnings.push(
       `The forecast holds a ${(a.marginTarget * 100).toFixed(1)}% operating margin for ever, ${((a.marginTarget - peerM) * 100).toFixed(0)} points above the industry average (${(peerM * 100).toFixed(1)}%, Damodaran). On average, about 38% of such a gap closes each year (Fama and French, 2000); the "Margin reverts to industry" scenario shows what that would mean.`,
     );

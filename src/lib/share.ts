@@ -1,6 +1,6 @@
 /**
  * Shareable links: the ticker, the beta choice, the view and every assumption that differs from its default go
- * into the URL, so a link reopens exactly the scenario on screen. Only scalar assumptions are encoded.
+ * into the URL, so a link reopens exactly the valuation on screen (saved scenarios stay in the browser and are not included). Only scalar assumptions are encoded.
  */
 import type { Assumptions } from './finance/assumptions';
 import type { Basis } from './finance/extract';
