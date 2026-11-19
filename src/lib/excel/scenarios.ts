@@ -42,14 +42,14 @@ export function prepareScenarioExport(h: Historicals, base: Assumptions, src: So
     if (vals.slice(1).some((x) => x !== vals[0])) inputs.push({ key: d.key, label: d.label, fmt: d.fmt, vals });
   }
 
-  const wDebt = baseRun.values.inputs.w_debt ?? 0;
-  const tax = base.tax;
   const adjust: ScenarioExport['adjust'] = fields.map((f) => {
     const neutral = neutralAdjust(base, [f])[f]!;
-    const cols = [neutral, ...applied.map((a) => {
+    const cols = [neutral, ...applied.map((a, i) => {
       const arr = a.adjust?.[f] ?? neutralAdjust(a, [f])[f]!;
       if (f === 'rfAdd' && a.adjust?.rdFollowsRf === false) {
-        const k = (1 - wDebt) / ((1 - wDebt) + wDebt * (1 - tax) || 1);
+        // Rescaled with this scenario's own debt weight and tax rate, which it may have changed.
+        const wDebt = runs[i].values.inputs.w_debt ?? 0;
+        const k = (1 - wDebt) / ((1 - wDebt) + wDebt * (1 - a.tax) || 1);
         return arr.map((x) => x * k);
       }
       return arr;

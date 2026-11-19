@@ -81,7 +81,7 @@ export interface Adjust {
   /** Margin set to a value: weight and value. Neutral weight 0. */
   marginSetW?: number[];
   marginSetV?: number[];
-  /** Capex as a share of revenue, year by year. Neutral = the model's own path. */
+  /** Change in capex as a share of revenue, on top of the model's own path. Neutral 0. */
   capex?: number[];
   /** Change in the risk-free rate in each year (temporary rate path). Neutral 0. */
   rfAdd?: number[];

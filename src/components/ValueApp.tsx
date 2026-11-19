@@ -473,8 +473,12 @@ function Valuation({ ticker, h, company, market }: Loaded) {
           {out.reverse.growth != null && price != null ? (
             <>
               To justify {fmt(price, 'usd')}, revenue must grow about <span className="text-accent">{fmt(out.reverse.growth, 'pct')}</span> a year on average
-              over the next five years, then fade to {fmt(a.gT, 'pct')}, at a {fmt(a.marginTarget, 'pct')} operating margin. The model assumes{' '}
-              {fmt(out.reverse.modelGrowth, 'pct')} on the {(a.growthMode ?? 'research') === 'research' ? 'research' : 'base-rate'} growth path.
+              over the next five years, then fade to {fmt(aEff.gT, 'pct')},{' '}
+              {aEff.adjust?.marginAdd || aEff.adjust?.marginSetW
+                ? `on the scenario's margin path (target ${fmt(aEff.marginTarget, 'pct')}, plus its yearly changes)`
+                : `at a ${fmt(aEff.marginTarget, 'pct')} operating margin`}
+              . The model assumes {fmt(out.reverse.modelGrowth, 'pct')} on the {(aEff.growthMode ?? 'research') === 'research' ? 'research' : 'base-rate'} growth
+              path{active ? ' with the scenario on' : ''}.
             </>
           ) : (
             out.reverse.message

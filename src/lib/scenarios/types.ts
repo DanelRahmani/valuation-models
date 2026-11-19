@@ -20,12 +20,14 @@ export type AssumptionLever =
   | 'rd'
   | 'rf'
   | 'exitMultiple'
-  | 'tax';
+  | 'tax'
+  | 'shares';
 
 /** Levers that only exist in scenarios and compile to per-year adjustments. */
 export type VirtualLever =
   | 'shockYear'
   | 'shockRevLoss'
+  | 'shockRevRecovery'
   | 'shockMarginDrop'
   | 'shockRecovery'
   | 'shockPermanent'
@@ -67,11 +69,11 @@ export interface Scenario {
   baseAtSave?: Partial<Record<Lever, number>>;
 }
 
-export type LeverFmt = 'pct' | 'num' | 'x' | 'beta' | 'yrs' | 'flag';
+export type LeverFmt = 'pct' | 'num' | 'x' | 'beta' | 'yrs' | 'flag' | 'shares';
 
 export interface LeverMeta {
   label: string;
-  group: 'Growth' | 'Margins' | 'Shock (one-time hit)' | 'Reinvestment' | 'Capacity' | 'Rates' | 'Risk and end value';
+  group: 'Growth' | 'Margins' | 'Shock (one-time hit)' | 'Reinvestment' | 'Capacity' | 'Rates' | 'Risk and end value' | 'Shares';
   fmt: LeverFmt;
   /** The operation the editor offers first. */
   op: Op;
@@ -83,14 +85,15 @@ export interface LeverMeta {
 }
 
 export const LEVERS: Record<Lever, LeverMeta> = {
-  g1: { label: 'Revenue growth, latest year', group: 'Growth', fmt: 'pct', op: 'scale', min: -0.5, max: 1.5, financial: true, help: 'Where the forecast starts; it then fades.' },
+  g1: { label: 'Revenue growth, latest year', group: 'Growth', fmt: 'pct', op: 'add', min: -0.5, max: 1.5, financial: true, help: 'Where the forecast starts; it then fades. Change it by points: scaling a decline would soften it.' },
   gDecay: { label: 'Excess growth kept each year', group: 'Growth', fmt: 'pct', op: 'add', min: 0, max: 0.99, financial: false, help: 'Lower = a boom fades faster. 70% halves the gap every two years.' },
   gTypical: { label: 'Typical company growth', group: 'Growth', fmt: 'pct', op: 'add', min: -0.05, max: 0.2, financial: false },
   gT: { label: 'Terminal growth', group: 'Growth', fmt: 'pct', op: 'add', min: -0.02, max: 0.05, financial: true, help: 'Capped at the risk-free rate.' },
   marginTarget: { label: 'Operating margin, target', group: 'Margins', fmt: 'pct', op: 'add', min: -0.5, max: 0.9, financial: false },
   marginYears: { label: 'Years to reach target margin', group: 'Margins', fmt: 'yrs', op: 'set', min: 1, max: 10, financial: false },
   shockYear: { label: 'Shock year (0 = none)', group: 'Shock (one-time hit)', fmt: 'yrs', op: 'set', min: 0, max: 10, financial: false, help: 'The year a rival product takes off.' },
-  shockRevLoss: { label: 'Revenue lost in the shock year', group: 'Shock (one-time hit)', fmt: 'pct', op: 'set', min: 0, max: 0.9, financial: false, help: 'A one-time drop in revenue level; growth carries on from there.' },
+  shockRevLoss: { label: 'Revenue lost in the shock year', group: 'Shock (one-time hit)', fmt: 'pct', op: 'set', min: 0, max: 0.9, financial: false, help: 'A one-time drop in revenue level below the base path.' },
+  shockRevRecovery: { label: 'Lost revenue won back each year', group: 'Shock (one-time hit)', fmt: 'pct', op: 'set', min: 0, max: 1, financial: false, help: '0% = the lost revenue stays lost (share taken by a rival); 50% = half the remaining gap to the base path closes each year (a cyclical dip).' },
   shockMarginDrop: { label: 'Margin hit', group: 'Shock (one-time hit)', fmt: 'pct', op: 'set', min: 0, max: 0.9, financial: false, help: 'Operating margin points lost from the shock year on.' },
   shockPermanent: { label: 'Share of the margin hit that is permanent', group: 'Shock (one-time hit)', fmt: 'pct', op: 'set', min: 0, max: 1, financial: false, help: 'The part competition keeps for good; 0% = a purely cyclical hit.' },
   shockRecovery: { label: 'Rest of the hit recovered each year', group: 'Shock (one-time hit)', fmt: 'pct', op: 'set', min: 0, max: 1, financial: false, help: 'Profitability reverts about 38% a year on average (Fama and French, 2000); 0% = none of it recovers.' },
@@ -109,15 +112,20 @@ export const LEVERS: Record<Lever, LeverMeta> = {
   erp: { label: 'Equity risk premium', group: 'Risk and end value', fmt: 'pct', op: 'add', min: 0, max: 0.15, financial: true },
   exitMultiple: { label: 'Exit EV/EBITDA (exit method only)', group: 'Risk and end value', fmt: 'x', op: 'scale', min: 1, max: 60, financial: false },
   tax: { label: 'Tax rate', group: 'Risk and end value', fmt: 'pct', op: 'add', min: 0, max: 0.5, financial: true },
+  shares: { label: 'Shares outstanding (dilution)', group: 'Shares', fmt: 'shares', op: 'scale', min: 0.001, max: 1e7, financial: true, help: 'Multiply by 1.05 for 5% more shares from stock pay or conversions; every per-share value divides by it.' },
 };
 
-export const ASSUMPTION_LEVERS: AssumptionLever[] = ['g1', 'gDecay', 'gTypical', 'gT', 'marginTarget', 'marginYears', 'capexPct', 'daPct', 'nwcPct', 'beta', 'erp', 'rd', 'rf', 'exitMultiple', 'tax'];
+export const ASSUMPTION_LEVERS: AssumptionLever[] = ['g1', 'gDecay', 'gTypical', 'gT', 'marginTarget', 'marginYears', 'capexPct', 'daPct', 'nwcPct', 'beta', 'erp', 'rd', 'rf', 'exitMultiple', 'tax', 'shares'];
+/** Own keys only: a hand-edited 'constructor' or 'toString' must not pass as a lever. */
+export const isLever = (l: unknown): l is Lever => typeof l === 'string' && Object.hasOwn(LEVERS, l);
+export const isPathLever = (l: unknown): l is PathLever => typeof l === 'string' && Object.hasOwn(PATH_META, l);
 export const isAssumptionLever = (l: Lever): l is AssumptionLever => (ASSUMPTION_LEVERS as string[]).includes(l);
 
 /** Neutral value of each virtual lever: the base case. capexNormal and growthCap have none (NaN = not set). */
 export const VIRTUAL_DEFAULTS: Record<VirtualLever, number> = {
   shockYear: 0,
   shockRevLoss: 0,
+  shockRevRecovery: 0,
   shockMarginDrop: 0,
   shockRecovery: 0,
   shockPermanent: 0,

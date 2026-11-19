@@ -46,5 +46,8 @@ describe('scenarios', () => {
     expect(s.margin[2]).toBeCloseTo(path(2), 8);
     expect(s.margin[3]).toBeCloseTo(path(3) - 0.1, 8);
     expect(s.margin[10]).toBeCloseTo(path(10) - 0.1, 8);
+    // A range limit may stop a change but never reverse it: a loss-maker's margin is not lifted by "worse margins".
+    const loss = applyScenario({ ...d.a, marginTarget: -0.8 }, { changes: [{ lever: 'marginTarget', op: 'add', value: -0.1 }] }).a;
+    expect(loss.marginTarget).toBeCloseTo(-0.8, 10);
   });
 });

@@ -48,11 +48,13 @@ FCFF value per share. FCFE, APV and residual income land within a few dollars of
 
 | Scenario | Value per share | vs base | vs price | Revenue, year 10 | WACC |
 |---|---|---|---|---|---|
-| Bull: moat holds | $569 | +99% | +266% | $4,406B | 12.7% |
+| Bull: moat holds | $395 | +38% | +154% | $2,811B | 12.7% |
 | Rate cut (−2 pts) | $370 | +29% | +138% | $1,980B | 10.7% |
+| Recession (demand shock + rate cut) | $356 | +24% | +129% | $1,979B | 10.7% |
 | **Base case** | **$286** | — | **+84%** | $1,980B | 12.7% |
 | Capex high, then normalises | $284 | −1% | +83% | $1,980B | 12.7% |
-| Capex stays high | $280 | −2% | +80% | $1,980B | 12.7% |
+| Capex stays high | $278 | −3% | +79% | $1,980B | 12.7% |
+| Demand shock (one bad year) | $273 | −5% | +76% | $1,979B | 12.7% |
 | Energy price shock (1973/1979/2022) | $266 | −7% | +71% | $1,861B | 12.7% |
 | Riskier than the market thinks (beta +0.3) | $249 | −13% | +60% | $1,980B | 13.9% |
 | Rate shock (10% for two years) | $239 | −16% | +54% | $1,980B | 13.7%* |
@@ -62,9 +64,7 @@ FCFF value per share. FCFE, APV and residual income land within a few dollars of
 | **New-entrant shock** | **$161** | −44% | **+4%** | $1,309B | 12.7% |
 | Custom silicon (shock + capex) | $160 | −44% | +3% | $1,309B | 12.7% |
 | Energy crunch (grid full) | $131 | −54% | −16% | $907B | 12.7% |
-| Recession (demand shock + rate cut) | $127 | −56% | −18% | $634B | 10.7% |
 | **Growth fades at base rates** | **$107** | −62% | −31% | $614B | 12.7% |
-| Demand shock (cyclical downturn) | $100 | −65% | −36% | $634B | 12.7% |
 | Perfect storm (shock + grid + rates) | $66 | −77% | −57% | $628B | 13.7%* |
 
 \* The lasting rate. Years 1-2 are discounted at the 10% spike.
@@ -82,10 +82,10 @@ $155 price. It takes a fifth of revenue, and the margin falls to 50% for good, k
 at the same 50% margin but loses no revenue in one go: $188. Even the base-rate case, where the margin reverts almost all
 the way to the industry's 38%, still gives $175. A 65% margin is valuable, but most of the value is in the growth.
 
-**4. For a company growing this fast, even one ordinary bad year is expensive.** A −12% year (a typical chip downturn) with
-a 10-point margin dip that recovers the way NVIDIA's did in fiscal 2023 gives $156 on its own. The margin dip hardly
-matters. What costs money is swapping a year of roughly +65% growth for −12%: revenue never catches up to the base path.
-Restarting at half the old momentum instead costs about the same ($150). Together they give $100.
+**4. A normal downturn barely matters; losing the momentum does.** A −12% year (a typical chip downturn) with a 10-point
+margin dip, half of which comes back each year (NVIDIA's own margin was back within a year after fiscal 2023), costs only
+5%: $273. Paired with a rate cut, as in a real recession, the value even rises. What costs money is the growth not coming
+back: "Growth fades at base rates" gives $107.
 
 **5. For NVIDIA, capex barely matters.** It spends 2.3% of revenue on capex because others make its chips; the AI
 build-out shows up on its customers' books, as NVIDIA's revenue. Its capex risk is a demand shock. For Microsoft,
@@ -130,9 +130,11 @@ an explicit future.
 - Sources and the full evidence table: `docs/research/scenario-calibration.md`. The 2019 −12% chip figure comes from trade
   press and should be checked against WSTS.
 
+**Changes after the independent review (19 Nov):** Bull fade 0.75 (was 0.8). "Capex stays high" no longer raises D&A, which in this model only added cash. Range limits can no longer reverse a change for loss-makers. The base case now carries a note when its margin is far above the industry.
+
 **Changes since the first draft (19 Nov):**
 - Five template fixes:
-  - Demand shock: now a one-year dip that recovers.
+  - Demand shock: now a one-year dip of −12% in absolute terms; half the lost revenue and half the margin dip come back each year.
   - New competition: now uses the same growth drag as the shock.
   - Capex templates: warn for low-capex companies.
   - Comparison table: shows year-by-year values.

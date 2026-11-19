@@ -161,6 +161,9 @@ function judge(wb: Workbook, v: Values, a: Assumptions): string[] {
   return warnings;
 }
 
+/** Above this lead over the industry operating margin, the page notes that the forecast holds the margin for ever. */
+export const MARGIN_GAP_NOTE = 0.15;
+
 /** Above this gap between residual income and FCFE, the residual-income card explains where the difference comes from. */
 export const RI_GAP_NOTE = 0.1;
 
@@ -243,6 +246,12 @@ export function runAll(h: Historicals, a: Assumptions, src: Sources): RunOutput 
   if (a.oneOff && a.marginTarget === a.oneOff.adjusted)
     warnings.push(
       `FY${a.oneOff.year} operating income includes $${a.oneOff.charges.toFixed(0)}M of impairments, which are non-cash and one-off. The forecast uses the ${(a.oneOff.adjusted * 100).toFixed(1)}% margin before them instead of the reported ${(a.oneOff.latest * 100).toFixed(1)}%. Set the target margin to ${(a.oneOff.latest * 100).toFixed(1)}% to use the reported figure.`,
+    );
+  // A margin far above the industry is held for ever by default. Say so: profitability usually reverts (Fama & French).
+  const peerM = a.peers.margin;
+  if (!a.financial && peerM != null && a.marginTarget != null && a.marginTarget - peerM > MARGIN_GAP_NOTE)
+    warnings.push(
+      `The forecast holds a ${(a.marginTarget * 100).toFixed(1)}% operating margin for ever, ${((a.marginTarget - peerM) * 100).toFixed(0)} points above the industry average (${(peerM * 100).toFixed(1)}%, Damodaran). On average, about 38% of such a gap closes each year (Fama and French, 2000); the "Margin reverts to industry" scenario shows what that would mean.`,
     );
   const interest = current(h, 'interestExpense', a.basis);
   // Debt found but far below what the interest bill implies (segment-tagged debt at Deere or Caterpillar's finance arms).

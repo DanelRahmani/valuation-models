@@ -56,7 +56,7 @@ export const ADJUST_ROWS: Record<AdjustField, { key: string; label: string; fmt:
   marginAdd: { key: 'sc_m_add', label: 'Scenario: margin change', fmt: 'pct' },
   marginSetW: { key: 'sc_m_w', label: 'Scenario: margin set (1 = yes)', fmt: 'num' },
   marginSetV: { key: 'sc_m_v', label: 'Scenario: margin set to', fmt: 'pct' },
-  capex: { key: 'sc_capex', label: 'Scenario: capex, % of revenue', fmt: 'pct' },
+  capex: { key: 'sc_capex', label: 'Scenario: capex change, % of revenue', fmt: 'pct' },
   rfAdd: { key: 'sc_rf', label: 'Scenario: risk-free rate change', fmt: 'pct' },
 };
 
@@ -81,11 +81,13 @@ export function fcffSheet(a: Assumptions, baseYear: Base, o: FcffOpts): SheetDef
     return `=${g}`;
   };
   const marginCell = (t: number) => {
-    let m = `margin_0+(${o.margin}-margin_0)*MIN(${t}/margin_years,1)`;
-    if (!adj || !(has('marginAdd') || has('marginSetW'))) return `=${m}`;
+    const path = `margin_0+(${o.margin}-margin_0)*MIN(${t}/margin_years,1)`;
+    if (!adj || !(has('marginAdd') || has('marginSetW'))) return `=${path}`;
+    let m = path;
     if (has('marginAdd')) m = `${m}+${r('marginAdd', t)}`;
     if (has('marginSetW')) m = `(1-${r('marginSetW', t)})*(${m})+${r('marginSetW', t)}*${r('marginSetV', t)}`;
-    return `=MAX(-0.5,${m})`;
+    // The -50% floor limits the scenario's change only: a base path already below it is never lifted.
+    return `=MAX(${m},MIN(${path},-0.5))`;
   };
   const adjRows: RowDef[] = adj
     ? ADJUST_FIELDS.filter(has).map((f) => ({
@@ -128,16 +130,14 @@ export function fcffSheet(a: Assumptions, baseYear: Base, o: FcffOpts): SheetDef
       key: 'capex',
       label: '- Capital expenditure',
       fmt: 'usdm',
-      cells: each((t) =>
-        has('capex')
-          ? `=@revenue[${t}]*${r('capex', t)}`
-          : t <= HIGH
-            ? `=@revenue[${t}]*${o.capex}`
-            : `=@revenue[${t}]*(${o.capex}+(MIN(da_pct,${o.capex})-${o.capex})*${((t - HIGH) / (N - HIGH)).toFixed(4)})`,
-      ),
-      note: has('capex')
-        ? 'Follows the scenario’s capex path (the row above).'
-        : 'Held at its share of revenue for five years. If it runs above D&A, it then falls to D&A by year 10: a mature company spends roughly what it depreciates. Capex below D&A (amortisation of acquired intangibles, which never needs replacing) is left alone.',
+      cells: each((t) => {
+        const share = t <= HIGH ? o.capex : `(${o.capex}+(MIN(da_pct,${o.capex})-${o.capex})*${((t - HIGH) / (N - HIGH)).toFixed(4)})`;
+        // A scenario's capex path is a change on top of the model's path, so capex_pct keeps driving it (also in Excel).
+        return has('capex') ? `=@revenue[${t}]*(${share}+${r('capex', t)})` : `=@revenue[${t}]*${share}`;
+      }),
+      note:
+        'Held at its share of revenue for five years. If it runs above D&A, it then falls to D&A by year 10: a mature company spends roughly what it depreciates. Capex below D&A (amortisation of acquired intangibles, which never needs replacing) is left alone.' +
+        (has('capex') ? ' The scenario’s capex change (row above) is added on top.' : ''),
     },
     { key: 'dnwc', label: '- Increase in working capital', fmt: 'usdm', cells: each((t) => `=(@revenue[${t}]-@revenue[${t - 1}])*nwc_pct`) },
     { key: 'fcff', label: 'Free cash flow to the firm', fmt: 'usdm', emphasis: true, cells: each((t) => `=@nopat[${t}]+@da[${t}]-@capex[${t}]-@dnwc[${t}]`) },

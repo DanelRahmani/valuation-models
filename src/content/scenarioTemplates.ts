@@ -5,6 +5,7 @@
  */
 import type { Assumptions } from '@/lib/finance/assumptions';
 import type { Change, PathChange } from '@/lib/scenarios/types';
+import { modelGrowthPath } from '@/lib/scenarios/apply';
 
 export interface Source {
   label: string;
@@ -75,9 +76,9 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     id: 'new-competition',
     name: 'New competition',
     story: 'Rivals, or customers building their own (custom chips, private labels), slowly erode pricing power.',
-    why: 'The slow squeeze: the margin closes half its lead over the industry within five years, and growth runs 3 points slower every year. It ends where the new-entrant shock ends, so the two compare timing.',
+    why: 'The slow squeeze: the margin closes half its lead over the industry within five years, and growth runs 3 points slower every year. It ends at the same margin as the new-entrant shock, but without the shock’s one-time loss of a fifth of revenue, so the two differ in timing and in that loss.',
     basis:
-      'About half of companies with top-quintile returns are still there ten years later (McKinsey), so half the lead is kept. Generic-drug entry cuts prices about 20% within two to three years once three competitors arrive (ASPE). The 3-point growth drag is a judgment call.',
+      'A small majority of top-quintile companies are still there ten years later and about half drop out (McKinsey), so half the lead is kept. Generic-drug entry cuts prices about 20% within two to three years once three competitors arrive (ASPE). The 3-point growth drag is a judgment call.',
     sources: [S.mckinsey, S.aspe, S.famaFrench],
     financial: false,
     caution: noGapCaution,
@@ -93,9 +94,9 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     id: 'new-entrant-shock',
     name: 'New-entrant shock',
     story: 'A rival product (a cheap TPU, Huawei Ascend, a custom ASIC) suddenly takes off in year 3, takes share and forces prices down.',
-    why: 'The sudden version of new competition: in year 3 revenue drops 20% and the margin falls by half its lead over the industry plus 5 points. The 5 points fade at 38% a year; the rest is permanent. Growth runs 3 points slower afterwards.',
+    why: 'The sudden version of new competition: in year 3 revenue drops 20% for good (share taken by the rival) and the margin falls by half its lead over the industry plus 5 points. The 5 points fade at 38% a year; the rest is permanent. Growth runs 3 points slower afterwards.',
     basis:
-      'Price drop: about 20% once three competitors enter (ASPE, generic drugs). Recovery: profitability reverts about 38% a year (Fama & French). Permanent part: about half of top performers keep their edge (McKinsey). The year-3 timing and the growth drag are judgment calls.',
+      'Price drop: about 20% once three competitors enter (ASPE, generic drugs). Recovery: profitability reverts about 38% a year (Fama & French). Permanent part: about half of top performers keep their edge for a decade (McKinsey). The year-3 timing and the growth drag are judgment calls.',
     sources: [S.aspe, S.famaFrench, S.mckinsey],
     financial: false,
     caution: noGapCaution,
@@ -131,19 +132,26 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
   },
   {
     id: 'demand-shock',
-    name: 'Demand shock (cyclical downturn)',
-    story: 'Customers cut spending: one down year, then a recovery at half the old momentum.',
-    why: 'Revenue falls 12% next year and the margin drops 10 points, then recovers half the remaining gap each year. Growth restarts from half its recent pace.',
+    name: 'Demand shock (one bad year)',
+    story: 'Customers cut spending for a year: sales fall, then climb back toward the old path.',
+    why: 'Next year revenue falls 12% (in absolute terms, not just below trend) and the margin drops 10 points. Half of the lost revenue and half of the margin dip come back each following year, so by year 5 the company is nearly back on its base path.',
     basis:
-      'Chip-industry sales fell 32% in 2001, 9% in 2009, about 12% in 2019 and 8% in 2023; −12% is a typical year, not the worst. NVIDIA’s own operating margin fell about 22 points in fiscal 2023 and was back within a year. Profitability below its mean reverts faster than average (Fama & French). Halving the momentum is a judgment call.',
+      'Chip-industry sales fell 32% in 2001, 9% in 2009, about 12% in 2019 and 8% in 2023; −12% is a typical bad year, not the worst. NVIDIA’s own operating margin fell about 22 points in fiscal 2023 and was back within a year. Profitability below its mean reverts faster than average (Fama & French). The 50% yearly recovery is a judgment call between those.',
     sources: [S.wsts2001, S.sia2009, S.sia2023, S.nvdaFy23, S.famaFrench],
     financial: false,
-    build: () => {
-      const g = blanks();
-      g[0] = -0.12;
+    build: (a) => {
+      // A −12% year in absolute terms is a drop below the base path that depends on how fast the company was growing.
+      const g = modelGrowthPath(a)[1];
+      const loss = Math.min(0.9, Math.max(0, 1 - (1 - 0.12) / (1 + g)));
       return {
-        changes: [c('g1', 'scale', 0.5), c('shockYear', 'set', 1), c('shockMarginDrop', 'set', 0.1), c('shockPermanent', 'set', 0), c('shockRecovery', 'set', 0.5)],
-        paths: [{ lever: 'growth', mode: 'set', values: g }],
+        changes: [
+          c('shockYear', 'set', 1),
+          c('shockRevLoss', 'set', loss),
+          c('shockRevRecovery', 'set', 0.5),
+          c('shockMarginDrop', 'set', 0.1),
+          c('shockPermanent', 'set', 0),
+          c('shockRecovery', 'set', 0.5),
+        ],
       };
     },
   },
@@ -155,6 +163,10 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     basis: 'This site’s backtest finds 23-33% of excess growth left after one year; growth rates have little persistence in general (Chan, Karceski & Lakonishok).',
     sources: [S.growthBacktest, S.ckl],
     financial: false,
+    caution: (a) =>
+      a.g1 <= (a.gTypical ?? 0.06)
+        ? 'This company is growing slower than a typical one, so a faster fade pulls its growth up toward typical and raises the value. Base rates work both ways.'
+        : null,
     build: () => ({ changes: [c('gDecay', 'set', 0.3)] }),
   },
   {
@@ -221,12 +233,13 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     id: 'capex-high',
     name: 'Capex stays high',
     story: 'The investment cycle never ends: data centres, fabs, grid connections.',
-    why: 'Capex half again as large and held for all ten years instead of fading to depreciation; depreciation rises with it.',
+    why: 'Capex half again as large and held for all ten years instead of fading to depreciation.',
     basis: 'A judgment call: there is no reliable base rate for how long investment cycles last. The default fade to depreciation reflects that mature firms spend roughly what they depreciate.',
     sources: [],
     financial: false,
     caution: capexCaution,
-    build: () => ({ changes: [c('capexPct', 'scale', 1.5), c('capexHighYears', 'set', 10), c('daPct', 'scale', 1.2)] }),
+    // D&A is left alone: with the operating margin fixed, more D&A would only add cash (no cost), raising the value.
+    build: () => ({ changes: [c('capexPct', 'scale', 1.5), c('capexHighYears', 'set', 10)] }),
   },
   {
     id: 'capex-normalises',
@@ -237,7 +250,7 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     sources: [],
     financial: false,
     caution: capexCaution,
-    build: (a) => ({ changes: [c('capexPct', 'scale', 1.5), c('capexHighYears', 'set', 3), c('capexNormal', 'set', a.daPct)] }),
+    build: () => ({ changes: [c('capexPct', 'scale', 1.5), c('capexHighYears', 'set', 3)] }),
   },
   {
     id: 'riskier',
@@ -253,10 +266,10 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     id: 'bull-moat',
     name: 'Bull: moat holds',
     story: 'Software and ecosystem lock-in keep pricing power.',
-    why: 'Growth fades more slowly (80% of the excess kept each year) and margins edge 3 points higher.',
-    basis: 'About half of top performers keep their edge for a decade (McKinsey): this is the half that does. The 80% fade and the 3 points are judgment calls.',
+    why: 'Growth fades more slowly (75% of the excess kept each year instead of 70%) and margins edge 3 points higher.',
+    basis: 'About half of top performers keep their edge for a decade (McKinsey): this is the half that does. The 75% fade and the 3 points are judgment calls; small changes to the fade compound hugely for a fast grower.',
     sources: [S.mckinsey],
     financial: false,
-    build: () => ({ changes: [c('gDecay', 'set', 0.8), c('marginTarget', 'add', 0.03)] }),
+    build: () => ({ changes: [c('gDecay', 'set', 0.75), c('marginTarget', 'add', 0.03)] }),
   },
 ];

@@ -12,7 +12,7 @@ import { fmt } from '@/lib/format';
 import { MODEL_NOTES } from '@/content/modelNotes';
 import { SCENARIO_TEMPLATES, type ScenarioTemplate } from '@/content/scenarioTemplates';
 import { applyScenario, baseSnapshot } from '@/lib/scenarios/apply';
-import { exportJson, importJson, loadScenarios, MAX_PER_COMPANY, newId, saveScenarios } from '@/lib/scenarios/store';
+import { exportJson, importJson, loadScenarios, MAX_PER_COMPANY, newId, saveScenarios, type LoadStatus } from '@/lib/scenarios/store';
 import { LEVERS, PATH_META, type Change, type Lever, type LeverFmt, type Op, type PathChange, type PathLever, type Scenario, type ScenarioDiff } from '@/lib/scenarios/types';
 import { Label } from './ui';
 
@@ -20,24 +20,44 @@ import { Label } from './ui';
 
 export function useScenarioList(key: string) {
   const [list, setList] = useState<Scenario[]>([]);
-  const [ok, setOk] = useState(true);
+  const [status, setStatus] = useState<LoadStatus>('ok');
   useEffect(() => {
     const l = loadScenarios(key);
-    setList(l ?? []);
-    setOk(l != null);
+    setList(l.list);
+    setStatus(l.status);
   }, [key]);
   const commit = (next: Scenario[]) => {
     setList(next);
-    setOk(saveScenarios(key, next));
+    if (key) setStatus(saveScenarios(key, next) ? 'ok' : 'blocked');
   };
+  const full = list.length >= MAX_PER_COMPANY;
   return {
     list,
-    storageOk: ok,
-    upsert: (s: Scenario) => commit(list.some((x) => x.id === s.id) ? list.map((x) => (x.id === s.id ? s : x)) : [...list, s].slice(0, MAX_PER_COMPANY)),
+    status,
+    full,
+    /** False (and nothing saved) when a new scenario would go over the per-company limit. */
+    upsert: (s: Scenario) => {
+      const exists = list.some((x) => x.id === s.id);
+      if (!exists && full) return false;
+      commit(exists ? list.map((x) => (x.id === s.id ? s : x)) : [...list, s]);
+      return true;
+    },
     remove: (id: string) => commit(list.filter((x) => x.id !== id)),
-    addMany: (xs: Scenario[]) => commit([...list, ...xs].slice(0, MAX_PER_COMPANY)),
+    /** How many of the given scenarios fitted under the limit. */
+    addMany: (xs: Scenario[]) => {
+      const fit = xs.slice(0, Math.max(0, MAX_PER_COMPANY - list.length));
+      commit([...list, ...fit]);
+      return fit.length;
+    },
   };
 }
+
+const STORAGE_NOTE: Record<LoadStatus, string | null> = {
+  ok: null,
+  blocked: 'This browser is blocking site storage, so scenarios last only until you leave the page.',
+  reset: 'The scenarios saved for this company could not be read (the saved data was damaged), so the list was reset to empty. Saving a scenario replaces the damaged data; restore from a backup file if you have one.',
+  session: 'This company has no ticker or CIK to save scenarios under, so they last only until you leave the page.',
+};
 export type ScenarioList = ReturnType<typeof useScenarioList>;
 
 /* ------------------------------------------------------------------ Formatting ------------------------------------------------------------------ */
@@ -49,6 +69,7 @@ export function leverText(x: number | null, f: LeverFmt): string {
   if (f === 'beta') return x.toFixed(2);
   if (f === 'flag') return x ? 'yes' : 'no';
   if (f === 'yrs') return `${x}`;
+  if (f === 'shares') return `${x.toLocaleString('en-US', { maximumFractionDigits: 0 })}M`;
   return String(+x.toFixed(3));
 }
 const unitOf = (op: Op, f: LeverFmt) => (op === 'scale' ? '×' : f === 'pct' ? (op === 'add' ? 'pts' : '%') : f === 'yrs' ? 'yrs' : f === 'x' ? 'x' : '');
@@ -130,14 +151,20 @@ export function ScenarioBanner({
           Back to base case
         </button>
       </div>
+      {/* On phones the banner stays short: the full list of changes is in the sidebar note and on the Scenarios tab. */}
       {diffs.length > 0 && (
-        <p className="mt-1.5 text-xs text-muted">
+        <p className="mt-1.5 text-xs text-muted sm:hidden">
+          {diffs.length} change{diffs.length === 1 ? '' : 's'} on top of the base case
+        </p>
+      )}
+      {diffs.length > 0 && (
+        <p className="mt-1.5 hidden text-xs text-muted sm:block">
           Changes: {diffs.map((d) => `${d.label} ${leverText(d.base, d.fmt)} → ${leverText(d.value, d.fmt)}`).join(' · ')}
           {scenario.paths?.some((p) => p.values.some((v) => v != null)) ? ' · plus year-by-year values' : ''}
         </p>
       )}
       {notes.map((n) => (
-        <p key={n} className="mt-1 text-xs text-muted">
+        <p key={n} className="mt-1 hidden text-xs text-muted sm:block">
           {n}
         </p>
       ))}
@@ -168,6 +195,7 @@ export function ScenariosTab({
 }) {
   const [draft, setDraft] = useState<Scenario | null>(null);
   const [importErr, setImportErr] = useState<string | null>(null);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
   const templates = SCENARIO_TEMPLATES.filter((t) => !a.financial || t.financial);
 
   const fromTemplate = (t: ScenarioTemplate): Scenario => {
@@ -185,10 +213,16 @@ export function ScenariosTab({
     () =>
       store.list.map((s) => {
         const ap = applyScenario(a, s);
-        return { s, ap, results: quickRun(h, ap.a, src).results };
+        const q = quickRun(h, ap.a, src);
+        return { s, ap, results: q.results, wacc: (a.financial ? q.values.inputs.re : q.values.inputs.wacc) ?? null };
       }),
     [store.list, a, h, src],
   );
+
+  const baseWacc = useMemo(() => {
+    const i = quickRun(h, a, src).values.inputs;
+    return (a.financial ? i.re : i.wacc) ?? null;
+  }, [h, a, src]);
 
   const download = () => {
     const blob = new Blob([exportJson(storeKey, store.list)], { type: 'application/json' });
@@ -210,8 +244,13 @@ export function ScenariosTab({
         draft={draft}
         templates={templates}
         onCancel={() => setDraft(null)}
+        error={saveErr}
         onSave={(s, apply) => {
-          store.upsert({ ...s, updatedAt: new Date().toISOString(), baseAtSave: baseSnapshot(a, s) });
+          if (!store.upsert({ ...s, updatedAt: new Date().toISOString(), baseAtSave: baseSnapshot(a, s) })) {
+            setSaveErr(`Not saved: you already have ${MAX_PER_COMPANY} scenarios for this company, the limit. Delete one first.`);
+            return;
+          }
+          setSaveErr(null);
           setDraft(null);
           if (apply) onApply(s.id);
         }}
@@ -227,7 +266,8 @@ export function ScenariosTab({
             What if competition arrives, rates jump or the grid runs out of power? A scenario changes a few assumptions on top of the base case and is never on
             unless you switch it on. Scenarios are saved in this browser only, are not part of share links, and go into the Excel download as a scenario switch.
           </p>
-          {!store.storageOk && <p className="mt-2 text-sm text-accent">This browser is blocking site storage, so scenarios last only until you leave the page.</p>}
+          {STORAGE_NOTE[store.status] && <p className="mt-2 text-sm text-accent">{STORAGE_NOTE[store.status]}</p>}
+          {store.full && <p className="mt-2 text-sm text-accent">You have {MAX_PER_COMPANY} scenarios for this company, the limit. Delete one to save another.</p>}
         </div>
         <div className="flex flex-wrap gap-2 text-sm">
           <button type="button" onClick={() => setDraft(blank())} className="rounded-full bg-accent px-4 py-1.5 font-semibold text-bg hover:bg-accent-hover">
@@ -251,7 +291,8 @@ export function ScenariosTab({
                   if (!f) return;
                   const xs = importJson(await f.text());
                   if (!xs.length) throw new Error('No scenarios found in that file.');
-                  store.addMany(xs);
+                  const n = store.addMany(xs);
+                  if (n < xs.length) setImportErr(`Restored ${n} of ${xs.length}: the limit is ${MAX_PER_COMPANY} scenarios per company.`);
                 } catch (x) {
                   setImportErr((x as Error).message);
                 }
@@ -263,7 +304,7 @@ export function ScenariosTab({
       </div>
       {importErr && <p className="mt-2 text-sm text-accent">{importErr}</p>}
 
-      {store.list.length > 0 && <Comparison baseResults={baseResults} runs={runs} a={a} activeId={activeId} onApply={onApply} />}
+      {store.list.length > 0 && <Comparison baseResults={baseResults} baseWacc={baseWacc} runs={runs} a={a} activeId={activeId} onApply={onApply} />}
 
       {store.list.length > 0 && (
         <div className="mt-10">
@@ -387,13 +428,15 @@ function Evidence({ t }: { t: ScenarioTemplate }) {
 
 function Comparison({
   baseResults,
+  baseWacc,
   runs,
   a,
   activeId,
   onApply,
 }: {
   baseResults: ModelResult[];
-  runs: { s: Scenario; ap: ReturnType<typeof applyScenario>; results: ModelResult[] }[];
+  runs: { s: Scenario; ap: ReturnType<typeof applyScenario>; results: ModelResult[]; wacc: number | null }[];
+  baseWacc: number | null;
   a: Assumptions;
   activeId: string | null;
   onApply: (id: string | null) => void;
@@ -476,6 +519,15 @@ function Comparison({
                 ))}
               </tr>
             ))}
+            <tr className="border-b border-seam/60 text-muted">
+              <td className="sticky left-0 bg-panel px-2 py-1.5 font-sans">{a.financial ? 'Cost of equity' : 'WACC (lasting)'}</td>
+              <td className="px-3 py-1.5 text-right">{fmt(baseWacc, 'pct') || '–'}</td>
+              {runs.map(({ s, wacc }) => (
+                <td key={s.id} className="px-3 py-1.5 text-right">
+                  {fmt(wacc, 'pct') || '–'}
+                </td>
+              ))}
+            </tr>
             {runs.some(({ s }) => pathSummary(s)) && (
               <tr className="border-b border-seam/60 text-muted">
                 <td className="sticky left-0 bg-panel px-2 py-1.5 font-sans">Also year by year</td>
@@ -518,6 +570,7 @@ function ScenarioEditor({
   templates,
   onCancel,
   onSave,
+  error,
 }: {
   h: Historicals;
   a: Assumptions;
@@ -527,6 +580,7 @@ function ScenarioEditor({
   templates: ScenarioTemplate[];
   onCancel: () => void;
   onSave: (s: Scenario, apply: boolean) => void;
+  error: string | null;
 }) {
   const [s, setS] = useState<Scenario>(initial);
   const [advanced, setAdvanced] = useState(() => (initial.paths ?? []).some((p) => p.values.some((v) => v != null)) || initial.changes.some((c) => !SIMPLE.some((x) => x.lever === c.lever && x.op === c.op)));
@@ -596,6 +650,7 @@ function ScenarioEditor({
               </>
             );
           })()}
+          {error && <p className="mt-2 text-xs text-accent">{error}</p>}
           {applied.notes.map((n) => (
             <p key={n} className="mt-2 text-xs text-muted">
               {n}
