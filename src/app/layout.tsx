@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Bodoni_Moda } from 'next/font/google';
 import { GeistSans } from 'geist/font/sans';
 import { GeistMono } from 'geist/font/mono';
+import { Analytics } from '@vercel/analytics/next';
 import { SiteNav } from '@/components/SiteNav';
 import { SITE_DESCRIPTION, SITE_TITLE, SITE_URL, pageMeta } from './_og/site';
 import './globals.css';
@@ -43,6 +44,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           </footer>
         </div>
+        <Analytics />
       </body>
     </html>
   );
