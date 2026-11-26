@@ -1,5 +1,8 @@
 import type ExcelJS from 'exceljs';
-import { cellAddress, toExcel, type Fmt, type Values, type Workbook } from '../finance/calcsheet';
+import { cellAddress, colLetter, toExcel, type Fmt, type Values, type Workbook } from '../finance/calcsheet';
+import type { Assumptions, Sources } from '../finance/assumptions';
+import type { Scenario } from '../scenarios/types';
+import { prepareScenarioExport } from './scenarios';
 import type { AlignedReturns } from '../finance/capm';
 import { LINE_LABELS, type Historicals, type LineItem } from '../finance/types';
 import type { RunOutput } from '../finance/run';
@@ -31,13 +34,30 @@ export async function exportWorkbook(
   h: Historicals,
   out: RunOutput,
   beta?: { aligned: AlignedReturns } | null,
+  sc?: { a: Assumptions; src: Sources; scenarios: Scenario[] } | null,
 ): Promise<Blob> {
   const { default: Excel } = await import('exceljs');
-  const wb: Workbook = out.wb;
-  const v: Values = out.values;
+  const scx = sc ? prepareScenarioExport(h, sc.a, sc.src, sc.scenarios) : null;
+  const wb: Workbook = scx?.wb ?? out.wb;
+  const v: Values = scx?.values ?? out.values;
   const book = new Excel.Workbook();
   book.creator = 'Valuation Models';
   book.created = new Date();
+
+  // Scenario switch layout (rows on the Scenarios sheet), worked out first so Inputs and model sheets can point at it.
+  const HEAD = 6;
+  const lastCol = scx ? colLetter(2 + scx.names.length - 1) : 'C';
+  const pick = (row: number) => `INDEX(Scenarios!$C$${row}:$${lastCol}$${row},scenario_idx)`;
+  const inputRow = new Map<string, number>();
+  const adjRow = new Map<string, number>(); // `${rowKey}:${t}` -> sheet row
+  if (scx) {
+    let r = HEAD + 2;
+    scx.inputs.forEach((x) => inputRow.set(x.key, r++));
+    r++;
+    scx.adjust.forEach((x) => {
+      for (let t = 1; t <= x.years.length - 1; t++) adjRow.set(`${x.rowKey}:${t}`, r++);
+    });
+  }
 
   /* About */
   const about = book.addWorksheet('About');
@@ -52,10 +72,73 @@ export async function exportWorkbook(
       ? `Reverse DCF: the price implies ${(out.reverse.growth * 100).toFixed(1)}% average revenue growth over years 1-5 on the model's growth path (solved by bisection on latest-year growth; use Goal Seek on FCFF to confirm).`
       : `Reverse DCF: ${out.reverse.message}`,
     ...out.warnings.map((w) => `Note: ${w}`),
+    ...(scx
+      ? [
+          `Scenarios: this file opens on the base case. Pick a scenario in the dropdown on the Scenarios sheet (cell B2) and every model recalculates.`,
+          ...scx.names.slice(1).map((n, i) => `  ${n}: ${scx.stories[i + 1] || 'no story given'}`),
+        ]
+      : []),
   ].forEach((t, i) => {
     about.getCell(i + 1, 1).value = t;
     if (i === 0) about.getCell(1, 1).font = { bold: true, size: 14, color: { argb: MAROON } };
   });
+
+  /* Scenarios: the switch, one column per case */
+  if (scx) {
+    const ws = book.addWorksheet('Scenarios');
+    header(ws, ['Scenario switch', '', '', '']);
+    ws.getColumn(1).width = 46;
+    ws.getColumn(2).width = 18;
+    for (let c = 3; c < 3 + scx.names.length; c++) ws.getColumn(c).width = 18;
+    ws.getCell(2, 1).value = 'Active scenario (pick from the list)';
+    const sel = ws.getCell(2, 2);
+    sel.value = 'Base case';
+    sel.font = { bold: true, color: { argb: 'FF1F4E9A' } };
+    sel.dataValidation = { type: 'list', allowBlank: false, formulae: [`$C$${HEAD}:$${lastCol}$${HEAD}`] };
+    book.definedNames.add('Scenarios!$B$2', 'scenario_sel');
+    ws.getCell(3, 1).value = 'Scenario number';
+    ws.getCell(3, 2).value = { formula: `MATCH(scenario_sel,$C$${HEAD}:$${lastCol}$${HEAD},0)`, result: 1 };
+    book.definedNames.add('Scenarios!$B$3', 'scenario_idx');
+    ws.getCell(4, 1).value = 'Inputs and model rows below read the active column. Saved in the browser; values relative to the base case when the file was made.';
+    ws.getCell(4, 1).font = { italic: true };
+    const hr = ws.getRow(HEAD);
+    ['Changed input', 'Name', ...scx.names].forEach((x, i) => (hr.getCell(i + 1).value = x));
+    hr.font = { bold: true };
+    const story = ws.getRow(HEAD + 1);
+    story.getCell(1).value = 'Story';
+    scx.stories.forEach((s, i) => (story.getCell(i + 3).value = s));
+    story.alignment = { wrapText: true, vertical: 'top' };
+    for (const x of scx.inputs) {
+      const r = ws.getRow(inputRow.get(x.key)!);
+      r.getCell(1).value = x.label;
+      r.getCell(2).value = x.key;
+      x.vals.forEach((val, i) => {
+        r.getCell(i + 3).value = val;
+        r.getCell(i + 3).numFmt = NUMFMT[x.fmt];
+      });
+    }
+    for (const x of scx.adjust)
+      for (let t = 1; t < x.years.length; t++) {
+        const r = ws.getRow(adjRow.get(`${x.rowKey}:${t}`)!);
+        r.getCell(1).value = `${x.label}, year ${t}`;
+        r.getCell(2).value = `FCFF ${x.rowKey}`;
+        x.years[t].forEach((val, i) => {
+          r.getCell(i + 3).value = val;
+          r.getCell(i + 3).numFmt = NUMFMT[x.fmt];
+        });
+      }
+    const top = Math.max(HEAD + 2, ...inputRow.values(), ...adjRow.values()) + 2;
+    ws.getCell(top, 1).value = 'Value per share by scenario (computed by the site; switch B2 to see each case live)';
+    ws.getCell(top, 1).font = { bold: true, color: { argb: MAROON } };
+    scx.summary.forEach((m, j) => {
+      const r = ws.getRow(top + 1 + j);
+      r.getCell(1).value = m.title;
+      m.vals.forEach((val, i) => {
+        r.getCell(i + 3).value = val;
+        r.getCell(i + 3).numFmt = NUMFMT.usd;
+      });
+    });
+  }
 
   /* Inputs, with one defined name per input */
   const inp = book.addWorksheet('Inputs');
@@ -65,12 +148,17 @@ export async function exportWorkbook(
     const row = i + 2;
     const c = inp.getCell(row, 2);
     const result = v.inputs[d.key] ?? undefined;
-    c.value = typeof d.value === 'string' ? { formula: toExcel(d.value, wb, undefined), result } : (d.value ?? null);
+    const switched = inputRow.get(d.key);
+    c.value = switched
+      ? { formula: pick(switched), result }
+      : typeof d.value === 'string'
+        ? { formula: toExcel(d.value, wb, undefined), result }
+        : (d.value ?? null);
     c.numFmt = NUMFMT[d.fmt];
     inp.getCell(row, 1).value = d.label;
-    inp.getCell(row, 3).value = d.source;
+    inp.getCell(row, 3).value = switched ? `Scenario switch (Scenarios sheet). Base: ${d.source}` : d.source;
     inp.getCell(row, 4).value = d.key;
-    if (typeof d.value !== 'string') c.font = { color: { argb: 'FF1F4E9A' } }; // blue = hard-coded input, banker convention
+    if (typeof d.value !== 'string' && !switched) c.font = { color: { argb: 'FF1F4E9A' } }; // blue = hard-coded input, banker convention
     book.definedNames.add(`Inputs!$B$${row}`, d.key);
   });
 
@@ -106,7 +194,8 @@ export async function exportWorkbook(
         if (cell == null) return;
         const target = row.getCell(c + 2);
         const result = v.sheets[s.name][r.key]?.[c] ?? undefined;
-        target.value = typeof cell === 'string' ? { formula: toExcel(cell, wb, s), result } : cell;
+        const switched = s.id === 'fcff' ? adjRow.get(`${r.key}:${c}`) : undefined;
+        target.value = switched ? { formula: pick(switched), result } : typeof cell === 'string' ? { formula: toExcel(cell, wb, s), result } : cell;
         target.numFmt = NUMFMT[r.fmt];
       });
       if (r.note) row.getCell(1).note = r.note;

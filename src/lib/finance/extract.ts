@@ -41,6 +41,9 @@ export const TAG_MAP: Record<LineItem, string[]> = {
     'MarketableSecuritiesCurrent',
     'AvailableForSaleSecuritiesDebtSecuritiesCurrent',
     'ShortTermInvestments',
+    // Balance-sheet marketable debt securities. Before the all-in AFS total, which also holds long-dated securities and
+    // AFS already counted in cash equivalents (NVIDIA tags only these two from late 2025).
+    'DebtSecuritiesCurrent',
     'AvailableForSaleSecuritiesDebtSecurities',
   ],
   debt: [],

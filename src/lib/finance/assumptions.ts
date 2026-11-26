@@ -57,7 +57,59 @@ export interface Assumptions {
   oneOff?: { year: number; latest: number; adjusted: number; charges: number; tag: string } | null;
   newShares: number;
   scenarios: Record<'bear' | 'base' | 'bull', { g1: number; margin: number; capexPct: number; prob: number }>;
+  /** Per-year adjustments compiled from a saved scenario (src/lib/scenarios). Absent = the base case, untouched. */
+  adjust?: Adjust;
 }
+
+/**
+ * Per-year adjustment rows for the FCFF forecast, one number per year (index 1-10; index 0 unused). The formula engine has
+ * no IF, so a scenario's shocks, caps and year-by-year values are compiled to plain numbers and the sheet only adds and
+ * multiplies them. Every field is optional; a missing field leaves that part of the forecast exactly as it is.
+ */
+export interface Adjust {
+  /** Added to revenue growth. Neutral 0. */
+  growthAdd?: number[];
+  /** Growth set to a value: weight (0 or 1) and value. Neutral weight 0. */
+  growthSetW?: number[];
+  growthSetV?: number[];
+  /** Highest growth allowed. Neutral 10 (1000%). */
+  growthCap?: number[];
+  /** Revenue level multiplier (one-time steps). Neutral 1. */
+  revStep?: number[];
+  /** Added to operating margin. Neutral 0. */
+  marginAdd?: number[];
+  /** Margin set to a value: weight and value. Neutral weight 0. */
+  marginSetW?: number[];
+  marginSetV?: number[];
+  /** Change in capex as a share of revenue, on top of the model's own path. Neutral 0. */
+  capex?: number[];
+  /** Change in the risk-free rate in each year (temporary rate path). Neutral 0. */
+  rfAdd?: number[];
+  /** Whether the cost of debt moves with the rate path (affects WACC's sensitivity to it). */
+  rdFollowsRf?: boolean;
+}
+
+export const ADJUST_FIELDS = [
+  'growthAdd',
+  'growthSetW',
+  'growthSetV',
+  'growthCap',
+  'revStep',
+  'marginAdd',
+  'marginSetW',
+  'marginSetV',
+  'capex',
+  'rfAdd',
+] as const;
+export type AdjustField = (typeof ADJUST_FIELDS)[number];
+
+/**
+ * New shares (stock pay, conversions) enter the per-share values when they can matter: in AI mode, when set, or while a
+ * scenario is active. At the default of 0 every value is unchanged.
+ */
+export const hasNewShares = (a: Assumptions) => a.aiMode || a.newShares !== 0 || !!a.adjust;
+/** The share count the per-share rows divide by. */
+export const shareCount = (a: Assumptions) => (hasNewShares(a) ? '(shares+new_shares)' : 'shares');
 
 /** Where each default came from, for the source badges. */
 export type Sources = Partial<Record<keyof Assumptions, string>>;
@@ -459,8 +511,8 @@ export function inputDefs(a: Assumptions, src: Sources, h: Historicals): InputDe
     I('roe_peer', 'Peer return on equity', a.peers.roe ?? null, 'pct', 'Peers', src.peers ?? 'You', 'Scales the peer P/B to this company’s return on equity'),
     I('peg_peer', 'Peer PEG', a.peers.peg, 'x', 'Peers', src.peers ?? 'You'),
   ];
+  if (hasNewShares(a)) defs.push(I('new_shares', 'New shares from conversions / SBC (M)', a.newShares, 'shares', 'Scenarios', a.aiMode ? 'You' : 'Scenario'));
   if (a.aiMode) {
-    defs.push(I('new_shares', 'New shares from conversions / SBC (M)', a.newShares, 'shares', 'Scenarios', 'You'));
     for (const s of ['bear', 'base', 'bull'] as const) {
       const sc = a.scenarios[s];
       const name = s[0].toUpperCase() + s.slice(1);

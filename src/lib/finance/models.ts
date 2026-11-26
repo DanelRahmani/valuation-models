@@ -1,4 +1,4 @@
-import type { Assumptions } from './assumptions';
+import { ADJUST_FIELDS, type AdjustField, type Assumptions } from './assumptions';
 import type { ModelId, RowDef, SheetDef } from './calcsheet';
 
 /** Explicit forecast length and high-growth years (growth fades linearly to terminal over years 6-10). */
@@ -46,24 +46,81 @@ const fade = (a: Assumptions, g1: string) => (t: number) => {
 const growth = (g1: string) => (t: number) =>
   t <= HIGH ? `=${g1}` : `=${g1}-(${g1}-g_terminal)*${((t - HIGH) / (N - HIGH)).toFixed(4)}`;
 
+/** Scenario adjustment rows: sheet row key, label and format for each Adjust field. Keys start with `sc_`. */
+export const ADJUST_ROWS: Record<AdjustField, { key: string; label: string; fmt: RowDef['fmt'] }> = {
+  growthAdd: { key: 'sc_g_add', label: 'Scenario: growth change', fmt: 'pct' },
+  growthSetW: { key: 'sc_g_w', label: 'Scenario: growth set (1 = yes)', fmt: 'num' },
+  growthSetV: { key: 'sc_g_v', label: 'Scenario: growth set to', fmt: 'pct' },
+  growthCap: { key: 'sc_g_cap', label: 'Scenario: most growth allowed (capacity)', fmt: 'pct' },
+  revStep: { key: 'sc_rev_step', label: 'Scenario: revenue step (1 = none)', fmt: 'num' },
+  marginAdd: { key: 'sc_m_add', label: 'Scenario: margin change', fmt: 'pct' },
+  marginSetW: { key: 'sc_m_w', label: 'Scenario: margin set (1 = yes)', fmt: 'num' },
+  marginSetV: { key: 'sc_m_v', label: 'Scenario: margin set to', fmt: 'pct' },
+  capex: { key: 'sc_capex', label: 'Scenario: capex change, % of revenue', fmt: 'pct' },
+  rfAdd: { key: 'sc_rf', label: 'Scenario: risk-free rate change', fmt: 'pct' },
+};
+
+/** How much of a risk-free change reaches WACC: equity always, debt only when its cost follows the rate. */
+const rfReach = (follows: boolean | undefined) => (follows === false ? '(1-w_debt)' : '((1-w_debt)+w_debt*(1-tax))');
+
+/** Discount factors that follow a temporary rate path: each year compounds at the base rate plus that year's change. */
+const pathDf = (rate: string) => ['=1', ...each((t) => `=@df[${t - 1}]/(1+${rate}+@FCFF.sc_rf[${t}])`).slice(1)];
+
 export function fcffSheet(a: Assumptions, baseYear: Base, o: FcffOpts): SheetDef {
+  // Scenario adjustments apply to the main FCFF sheet only, never to the AI-mode bear/base/bull copies.
+  const adj = o.id === 'fcff' ? a.adjust : undefined;
+  const has = (f: AdjustField) => !!adj?.[f];
+  const r = (f: AdjustField, t: number) => `@${ADJUST_ROWS[f].key}[${t}]`;
+  const growthCell = (t: number) => {
+    const base = fade(a, o.g1)(t);
+    if (!adj) return base;
+    let g = base.slice(1);
+    if (has('growthAdd')) g = `${g}+${r('growthAdd', t)}`;
+    if (has('growthCap')) g = `MIN(${g},${r('growthCap', t)})`;
+    if (has('growthSetW')) g = `(1-${r('growthSetW', t)})*(${g})+${r('growthSetW', t)}*${r('growthSetV', t)}`;
+    return `=${g}`;
+  };
+  const marginCell = (t: number) => {
+    const path = `margin_0+(${o.margin}-margin_0)*MIN(${t}/margin_years,1)`;
+    if (!adj || !(has('marginAdd') || has('marginSetW'))) return `=${path}`;
+    let m = path;
+    if (has('marginAdd')) m = `${m}+${r('marginAdd', t)}`;
+    if (has('marginSetW')) m = `(1-${r('marginSetW', t)})*(${m})+${r('marginSetW', t)}*${r('marginSetV', t)}`;
+    // The -50% floor limits the scenario's change only: a base path already below it is never lifted.
+    return `=MAX(${m},MIN(${path},-0.5))`;
+  };
+  const adjRows: RowDef[] = adj
+    ? ADJUST_FIELDS.filter(has).map((f) => ({
+        key: ADJUST_ROWS[f].key,
+        label: ADJUST_ROWS[f].label,
+        fmt: ADJUST_ROWS[f].fmt,
+        cells: [null, ...adj[f]!.slice(1, N + 1)],
+        note: 'Set by the active scenario. Neutral values leave the base case unchanged.',
+      }))
+    : [];
   const rows: RowDef[] = [
+    ...adjRows,
     {
       key: 'growth',
       label: 'Revenue growth',
       fmt: 'pct',
-      cells: each(fade(a, o.g1)),
+      cells: each(growthCell),
       note:
         (a.growthMode ?? 'research') === 'research'
           ? 'Research path: growth above typical keeps a fixed share each year (McKinsey’s observed decay); typical growth slides to terminal growth by year 10.'
           : 'Base-rate path, backtested on S&P 500 revenue 2017-2025: most growth above typical is gone after a year, a lasting share fades out by year 10.',
     },
-    { key: 'revenue', label: 'Revenue', fmt: 'usdm', cells: [`=rev_0`, ...each((t) => `=@revenue[${t - 1}]*(1+@growth[${t}])`).slice(1)] },
+    {
+      key: 'revenue',
+      label: 'Revenue',
+      fmt: 'usdm',
+      cells: [`=rev_0`, ...each((t) => `=@revenue[${t - 1}]*(1+@growth[${t}])${has('revStep') ? `*${r('revStep', t)}` : ''}`).slice(1)],
+    },
     {
       key: 'margin',
       label: 'Operating margin',
       fmt: 'pct',
-      cells: ['=margin_0', ...each((t) => `=margin_0+(${o.margin}-margin_0)*MIN(${t}/margin_years,1)`).slice(1)],
+      cells: ['=margin_0', ...each(marginCell).slice(1)],
       note: 'Moves in a straight line from today’s margin to the target, then holds.',
     },
     { key: 'ebit', label: 'Operating income (EBIT)', fmt: 'usdm', cells: each((t) => `=@revenue[${t}]*@margin[${t}]`, 0) },
@@ -73,16 +130,25 @@ export function fcffSheet(a: Assumptions, baseYear: Base, o: FcffOpts): SheetDef
       key: 'capex',
       label: '- Capital expenditure',
       fmt: 'usdm',
-      cells: each((t) =>
-        t <= HIGH
-          ? `=@revenue[${t}]*${o.capex}`
-          : `=@revenue[${t}]*(${o.capex}+(MIN(da_pct,${o.capex})-${o.capex})*${((t - HIGH) / (N - HIGH)).toFixed(4)})`,
-      ),
-      note: 'Held at its share of revenue for five years. If it runs above D&A, it then falls to D&A by year 10: a mature company spends roughly what it depreciates. Capex below D&A (amortisation of acquired intangibles, which never needs replacing) is left alone.',
+      cells: each((t) => {
+        const share = t <= HIGH ? o.capex : `(${o.capex}+(MIN(da_pct,${o.capex})-${o.capex})*${((t - HIGH) / (N - HIGH)).toFixed(4)})`;
+        // A scenario's capex path is a change on top of the model's path, so capex_pct keeps driving it (also in Excel).
+        return has('capex') ? `=@revenue[${t}]*(${share}+${r('capex', t)})` : `=@revenue[${t}]*${share}`;
+      }),
+      note:
+        'Held at its share of revenue for five years. If it runs above D&A, it then falls to D&A by year 10: a mature company spends roughly what it depreciates. Capex below D&A (amortisation of acquired intangibles, which never needs replacing) is left alone.' +
+        (has('capex') ? ' The scenario’s capex change (row above) is added on top.' : ''),
     },
     { key: 'dnwc', label: '- Increase in working capital', fmt: 'usdm', cells: each((t) => `=(@revenue[${t}]-@revenue[${t - 1}])*nwc_pct`) },
     { key: 'fcff', label: 'Free cash flow to the firm', fmt: 'usdm', emphasis: true, cells: each((t) => `=@nopat[${t}]+@da[${t}]-@capex[${t}]-@dnwc[${t}]`) },
-    { key: 'df', label: 'Discount factor at WACC', fmt: 'num', cells: each((t) => `=1/(1+wacc)^${t}`) },
+    has('rfAdd')
+      ? {
+          key: 'df',
+          label: 'Discount factor at WACC (with the scenario’s rate path)',
+          fmt: 'num',
+          cells: ['=1', ...each((t) => `=@df[${t - 1}]/(1+wacc+@sc_rf[${t}]*${rfReach(adj!.rdFollowsRf)})`).slice(1)],
+        }
+      : { key: 'df', label: 'Discount factor at WACC', fmt: 'num', cells: each((t) => `=1/(1+wacc)^${t}`) },
     { key: 'pv', label: 'Present value of FCFF', fmt: 'usdm', cells: each((t) => `=@fcff[${t}]*@df[${t}]`) },
     a.terminalMethod === 'exit'
       ? { key: 'tv', label: 'Terminal value (exit EV/EBITDA)', fmt: 'usdm', cells: atN(`=(@ebit[${N}]+@da[${N}])*exit_multiple`) }
@@ -96,7 +162,7 @@ export function fcffSheet(a: Assumptions, baseYear: Base, o: FcffOpts): SheetDef
   return { id: o.id, name: o.name, title: o.title, columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
 }
 
-export function fcfeSheet(baseYear: Base): SheetDef {
+export function fcfeSheet(baseYear: Base, ratePath = false, sh = 'shares'): SheetDef {
   const rows: RowDef[] = [
     { key: 'ebit', label: 'Operating income (from FCFF)', fmt: 'usdm', cells: each((t) => `=@FCFF.ebit[${t}]`) },
     { key: 'interest', label: '- Interest (debt × cost of debt)', fmt: 'usdm', cells: each(() => '=debt*rd') },
@@ -115,20 +181,20 @@ export function fcfeSheet(baseYear: Base): SheetDef {
       cells: each((t) => `=@ni[${t}]-(1-w_debt)*@reinvest[${t}]`),
       note: 'Reinvestment is funded with debt in proportion to the current debt weight, so leverage stays constant.',
     },
-    { key: 'df', label: 'Discount factor at cost of equity', fmt: 'num', cells: each((t) => `=1/(1+re)^${t}`) },
+    { key: 'df', label: 'Discount factor at cost of equity', fmt: 'num', cells: ratePath ? pathDf('re') : each((t) => `=1/(1+re)^${t}`) },
     { key: 'pv', label: 'Present value of FCFE', fmt: 'usdm', cells: each((t) => `=@fcfe[${t}]*@df[${t}]`) },
     { key: 'tv', label: 'Terminal value (Gordon growth)', fmt: 'usdm', cells: atN(`=@fcfe[${N}]*(1+g_terminal)/(re-g_terminal)`) },
     { key: 'pv_tv', label: 'Present value of terminal value', fmt: 'usdm', cells: atN(`=@tv[${N}]*@df[${N}]`) },
     { key: 'equity', label: 'Equity value (+ cash and investments)', fmt: 'usdm', emphasis: true, cells: at0(`=SUM(@pv[1]:@pv[${N}])+@pv_tv[${N}]+cash+sti`) },
-    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0('=@equity[0]/shares') },
+    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0(`=@equity[0]/${sh}`) },
   ];
   return { id: 'fcfe', name: 'FCFE', title: 'Free cash flow to equity', columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
 }
 
-export function apvSheet(baseYear: Base): SheetDef {
+export function apvSheet(baseYear: Base, ratePath = false, sh = 'shares'): SheetDef {
   const rows: RowDef[] = [
     { key: 'fcff', label: 'Free cash flow to the firm (from FCFF)', fmt: 'usdm', cells: each((t) => `=@FCFF.fcff[${t}]`) },
-    { key: 'df', label: 'Discount factor at unlevered cost of equity', fmt: 'num', cells: each((t) => `=1/(1+ru)^${t}`) },
+    { key: 'df', label: 'Discount factor at unlevered cost of equity', fmt: 'num', cells: ratePath ? pathDf('ru') : each((t) => `=1/(1+ru)^${t}`) },
     { key: 'pv', label: 'Present value', fmt: 'usdm', cells: each((t) => `=@fcff[${t}]*@df[${t}]`) },
     { key: 'tv', label: 'Terminal value (Gordon growth)', fmt: 'usdm', cells: atN(`=@fcff[${N}]*(1+g_terminal)/(ru-g_terminal)`) },
     { key: 'pv_tv', label: 'Present value of terminal value', fmt: 'usdm', cells: atN(`=@tv[${N}]*@df[${N}]`) },
@@ -142,12 +208,12 @@ export function apvSheet(baseYear: Base): SheetDef {
     },
     { key: 'apv', label: 'Adjusted present value (EV)', fmt: 'usdm', emphasis: true, cells: at0('=@vu[0]+@shield[0]') },
     { key: 'equity', label: '- Net debt (+ net cash) = equity value', fmt: 'usdm', cells: at0('=@apv[0]-net_debt') },
-    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0('=@equity[0]/shares') },
+    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0(`=@equity[0]/${sh}`) },
   ];
   return { id: 'apv', name: 'APV', title: 'Adjusted present value', columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
 }
 
-export function riSheet(baseYear: Base): SheetDef {
+export function riSheet(baseYear: Base, ratePath = false, sh = 'shares'): SheetDef {
   const rows: RowDef[] = [
     { key: 'ni', label: 'Net income (from FCFE)', fmt: 'usdm', cells: each((t) => `=@FCFE.ni[${t}]`) },
     {
@@ -166,7 +232,7 @@ export function riSheet(baseYear: Base): SheetDef {
     },
     { key: 'charge', label: 'Equity charge (re × opening book)', fmt: 'usdm', cells: each((t) => `=re*@book[${t - 1}]`) },
     { key: 'ri', label: 'Residual income', fmt: 'usdm', emphasis: true, cells: each((t) => `=@ni[${t}]-@charge[${t}]`) },
-    { key: 'df', label: 'Discount factor at cost of equity', fmt: 'num', cells: each((t) => `=1/(1+re)^${t}`) },
+    { key: 'df', label: 'Discount factor at cost of equity', fmt: 'num', cells: ratePath ? pathDf('re') : each((t) => `=1/(1+re)^${t}`) },
     { key: 'pv', label: 'Present value of residual income', fmt: 'usdm', cells: each((t) => `=@ri[${t}]*@df[${t}]`) },
     { key: 'tv', label: 'Terminal value of residual income', fmt: 'usdm', cells: atN(`=@ri[${N}]*(1+g_terminal)/(re-g_terminal)`) },
     { key: 'pv_tv', label: 'Present value of terminal value', fmt: 'usdm', cells: atN(`=@tv[${N}]*@df[${N}]`) },
@@ -177,7 +243,7 @@ export function riSheet(baseYear: Base): SheetDef {
       emphasis: true,
       cells: at0(`=@book[0]+SUM(@pv[1]:@pv[${N}])+@pv_tv[${N}]+cash+sti`),
     },
-    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0('=@equity[0]/shares') },
+    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0(`=@equity[0]/${sh}`) },
   ];
   return { id: 'ri', name: 'ResidualIncome', title: 'Residual income', columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
 }
@@ -186,7 +252,7 @@ export function riSheet(baseYear: Base): SheetDef {
  * Residual income for banks and insurers: book equity is the operating base, so it grows with the growth path and
  * earns the return on equity. Value = book + PV of (ROE - cost of equity) × opening book.
  */
-export function riFinancialSheet(baseYear: Base): SheetDef {
+export function riFinancialSheet(baseYear: Base, ratePath = false, sh = 'shares'): SheetDef {
   const rows: RowDef[] = [
     { key: 'growth', label: 'Book equity growth', fmt: 'pct', cells: each(growth('g_stage1')) },
     { key: 'book', label: 'Book equity, end of year', fmt: 'usdm', cells: ['=equity_0', ...each((t) => `=@book[${t - 1}]*(1+@growth[${t}])`).slice(1)] },
@@ -207,12 +273,12 @@ export function riFinancialSheet(baseYear: Base): SheetDef {
       cells: each((t) => `=@ni[${t}]-@charge[${t}]`),
       note: 'A bank earning exactly its cost of equity is worth its book value.',
     },
-    { key: 'df', label: 'Discount factor at cost of equity', fmt: 'num', cells: each((t) => `=1/(1+re)^${t}`) },
+    { key: 'df', label: 'Discount factor at cost of equity', fmt: 'num', cells: ratePath ? pathDf('re') : each((t) => `=1/(1+re)^${t}`) },
     { key: 'pv', label: 'Present value of residual income', fmt: 'usdm', cells: each((t) => `=@ri[${t}]*@df[${t}]`) },
     { key: 'tv', label: 'Terminal value of residual income', fmt: 'usdm', cells: atN(`=@ri[${N}]*(1+g_terminal)/(re-g_terminal)`) },
     { key: 'pv_tv', label: 'Present value of terminal value', fmt: 'usdm', cells: atN(`=@tv[${N}]*@df[${N}]`) },
     { key: 'equity', label: 'Book equity + PV of residual income', fmt: 'usdm', emphasis: true, cells: at0(`=@book[0]+SUM(@pv[1]:@pv[${N}])+@pv_tv[${N}]`) },
-    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0('=@equity[0]/shares') },
+    { key: 'per_share', label: 'Value per share', fmt: 'usd', emphasis: true, cells: at0(`=@equity[0]/${sh}`) },
   ];
   return { id: 'ri', name: 'ResidualIncome', title: 'Residual income (financial firm)', columns: cols(baseYear), rows, result: { row: 'per_share', col: 0 }, status: 'ok' };
 }
@@ -274,7 +340,7 @@ export function ddmSheets(): SheetDef[] {
  * growth, when the payout rises to what a mature company can afford (1 - g / re). Discounted at the cost of equity and
  * divided by today's shares, so buybacks are not double counted.
  */
-export function totalPayoutSheet(): SheetDef {
+export function totalPayoutSheet(sh = 'shares'): SheetDef {
   const yrs = [`Now`, ...Array.from({ length: HIGH }, (_, i) => `Year ${i + 1}`)];
   const e = (f: (t: number) => string) => Array.from({ length: HIGH + 1 }, (_, t) => (t === 0 ? null : f(t)));
   return {
@@ -301,7 +367,7 @@ export function totalPayoutSheet(): SheetDef {
         cells: Array.from({ length: HIGH + 1 }, (_, t) => (t === HIGH ? `=@ni[${HIGH}]*(1+g_terminal)*@tv_payout[${HIGH}]/(re-g_terminal)` : null)),
       },
       { key: 'equity', label: 'Equity value', fmt: 'usdm', cells: [`=SUM(@pv[1]:@pv[${HIGH}])+@tv[${HIGH}]/(1+re)^${HIGH}`] },
-      { key: 'per_share', label: 'Value per share = equity value / shares', fmt: 'usd', emphasis: true, cells: ['=@equity[0]/shares'] },
+      { key: 'per_share', label: 'Value per share = equity value / shares', fmt: 'usd', emphasis: true, cells: [`=@equity[0]/${sh}`] },
     ],
     result: { row: 'per_share', col: 0 },
     status: 'ok',

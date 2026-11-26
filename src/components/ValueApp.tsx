@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { defaultAssumptions, defaultBetaMethod, MIN_BETA_R2, MIN_INDUSTRY_FIRMS, type Assumptions, type Sources } from '@/lib/finance/assumptions';
 import { evaluate, type ModelId } from '@/lib/finance/calcsheet';
 import { extractHistoricals, type Basis } from '@/lib/finance/extract';
-import { runAll } from '@/lib/finance/run';
+import { quickRun, runAll } from '@/lib/finance/run';
 import { LINE_LABELS, type CompanyFile, type Historicals, type IndustryRow, type MarketFile, type SnapshotBeta } from '@/lib/finance/types';
 import { fmt, fmtDate } from '@/lib/format';
 import { MODEL_NOTES } from '@/content/modelNotes';
@@ -23,8 +23,11 @@ import { Peers, usePeers, type PeerMultiples } from './Peers';
 import { QaBadge } from './QaBadge';
 import { SimpleView } from './SimpleView';
 import { applyShare, decodeShare, encodeShare, type BetaChoice } from '@/lib/share';
+import { ScenarioBanner, ScenariosTab, headlineId, leverText, useScenarioList } from './Scenarios';
+import { applyScenario } from '@/lib/scenarios/apply';
+import { storageKey } from '@/lib/scenarios/store';
 
-type Tab = 'models' | 'value' | 'peers' | 'risk' | 'filings';
+type Tab = 'models' | 'scenarios' | 'value' | 'peers' | 'risk' | 'filings';
 
 interface Loaded {
   ticker: string;
@@ -212,35 +215,48 @@ function Valuation({ ticker, h, company, market }: Loaded) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [industry]);
 
-  const out = useMemo(() => runAll(h, a, src), [h, a, src]);
+  // Saved scenarios (this browser only). The page always opens on the base case; a scenario is on only when switched on.
+  const scKey = storageKey(ticker, h.cik);
+  const scStore = useScenarioList(scKey);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const active = scStore.list.find((s) => s.id === activeId) ?? null;
+  const applied = useMemo(() => (active ? applyScenario(a, active) : null), [a, active]);
+  /** The assumptions the page runs on: the base case, or the base case with the active scenario on top. */
+  const aEff = applied?.a ?? a;
+
+  const marginFromScenario = !!applied?.diffs.some((d) => d.lever === 'marginTarget' || d.lever === 'marginYears' || d.lever === 'shockMarginDrop');
+  const out = useMemo(() => runAll(h, aEff, src, { marginFromScenario }), [h, aEff, src, marginFromScenario]);
+  /** Base-case results, kept next to the scenario's so every card can show both. */
+  const baseResults = useMemo(() => (active ? quickRun(h, a, src).results : out.results), [active, h, a, src, out]);
+  const basePs = (id: ModelId) => baseResults.find((r) => r.id === id && r.status === 'ok')?.perShare ?? null;
   const I = out.values.inputs;
   const price = I.price ?? null;
 
-  const field = useMemo(() => buildField(out, a), [out, a]);
+  const field = useMemo(() => buildField(out, aEff), [out, aEff]);
   const storyData = useMemo(() => buildStory(prettyName(h.name), h, out), [h, out]);
   // Sensitivity of the headline model (FCFF, or residual income for banks), shared by the tornado and Monte Carlo.
   const tornadoInputs: TornadoInputs = useMemo(
     () => ({
       wacc: I.wacc ?? null,
       re: I.re ?? null,
-      beta: a.beta,
+      beta: aEff.beta,
       betaSe: betaChoice === 'regression' || betaChoice === 'blume' ? (company?.beta?.se ?? null) : null,
-      g1: a.g1,
-      gT: a.gT,
-      marginTarget: a.marginTarget,
-      capexPct: a.capexPct,
-      nwcPct: a.nwcPct,
-      tax: a.tax,
-      roe: a.roe,
+      g1: aEff.g1,
+      gT: aEff.gT,
+      marginTarget: aEff.marginTarget,
+      capexPct: aEff.capexPct,
+      nwcPct: aEff.nwcPct,
+      tax: aEff.tax,
+      roe: aEff.roe,
     }),
-    [I.wacc, I.re, a, betaChoice, company],
+    [I.wacc, I.re, aEff, betaChoice, company],
   );
   const tornadoRows = useMemo(() => {
     const ok = out.results.find((r) => r.id === (a.financial ? 'ri' : 'fcff'))?.status === 'ok';
     return ok ? tornado(out.wb, tornadoInputs, a.financial) : [];
   }, [out, tornadoInputs, a.financial]);
 
-  // Keep the address bar in step with the scenario, so it can be shared.
+  // Keep the address bar in step with the assumptions on screen, so the valuation can be shared (saved scenarios are not).
   const query = ticker
     ? encodeShare({ ticker, beta: betaChoice, defaultBeta: suggestedBeta, simple, a, defaults: initial.a, basis: h.ttm && basisWanted === 'fy' ? 'fy' : undefined })
     : '';
@@ -264,7 +280,9 @@ function Valuation({ ticker, h, company, market }: Loaded) {
     setBusy(true);
     try {
       const { exportWorkbook } = await import('@/lib/excel/export');
-      const blob = await exportWorkbook(ticker || h.name, h, out, uploaded);
+      // The workbook always opens on the base case; saved scenarios ride along behind a scenario switch.
+      const baseOut = active ? runAll(h, a, src) : out;
+      const blob = await exportWorkbook(ticker || h.name, h, baseOut, uploaded, { a, src, scenarios: scStore.list });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -424,12 +442,28 @@ function Valuation({ ticker, h, company, market }: Loaded) {
             </Link>
           )}
           {ticker && (
-            <button type="button" onClick={copyLink} className="link" aria-live="polite">
-              {copied ? 'Link copied' : 'Copy link to this scenario'}
+            <button
+              type="button"
+              onClick={copyLink}
+              className="link"
+              aria-live="polite"
+              title={active ? 'Share links carry the base case only; saved scenarios stay in this browser.' : undefined}
+            >
+              {copied ? 'Link copied' : active ? 'Copy link (base case)' : 'Copy link to this valuation'}
             </button>
           )}
         </div>
       </div>
+      {active && applied && (
+        <ScenarioBanner
+          scenario={active}
+          diffs={applied.diffs}
+          notes={applied.notes}
+          base={basePs(headlineId(a.financial))}
+          value={out.results.find((r) => r.id === headlineId(a.financial) && r.status === 'ok')?.perShare ?? null}
+          onBase={() => setActiveId(null)}
+        />
+      )}
       {simple ? (
         <SimpleView name={prettyName(h.name)} h={h} a={a} out={out} field={field} onExpert={() => setSimple(false)} />
       ) : (
@@ -440,8 +474,12 @@ function Valuation({ ticker, h, company, market }: Loaded) {
           {out.reverse.growth != null && price != null ? (
             <>
               To justify {fmt(price, 'usd')}, revenue must grow about <span className="text-accent">{fmt(out.reverse.growth, 'pct')}</span> a year on average
-              over the next five years, then fade to {fmt(a.gT, 'pct')}, at a {fmt(a.marginTarget, 'pct')} operating margin. The model assumes{' '}
-              {fmt(out.reverse.modelGrowth, 'pct')} on the {(a.growthMode ?? 'research') === 'research' ? 'research' : 'base-rate'} growth path.
+              over the next five years, then fade to {fmt(aEff.gT, 'pct')},{' '}
+              {aEff.adjust?.marginAdd || aEff.adjust?.marginSetW
+                ? `on the scenario's margin path (target ${fmt(aEff.marginTarget, 'pct')}, plus its yearly changes)`
+                : `at a ${fmt(aEff.marginTarget, 'pct')} operating margin`}
+              . The model assumes {fmt(out.reverse.modelGrowth, 'pct')} on the {(aEff.growthMode ?? 'research') === 'research' ? 'research' : 'base-rate'} growth
+              path{active ? ' with the scenario on' : ''}.
             </>
           ) : (
             out.reverse.message
@@ -466,6 +504,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
         {(
           [
             ['models', 'Models'],
+            ['scenarios', 'Scenarios'],
             ['value', 'Value creation'],
             ['peers', 'Peers'],
             ['risk', 'Uncertainty'],
@@ -492,10 +531,25 @@ function Valuation({ ticker, h, company, market }: Loaded) {
       </div>
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="pt-10">
         {tab === 'models' && (
-      <div className="grid gap-12 lg:grid-cols-[340px_1fr]">
+      <div className="grid gap-12 lg:grid-cols-[340px_minmax(0,1fr)]">
         <aside className="lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:pr-2">
           <h2 className="font-serif text-2xl">Assumptions</h2>
           <p className="mt-1 text-xs text-muted">Every field shows where its value came from. Change anything; the models update as you type.</p>
+          {active && applied && (
+            <div className="mt-3 rounded border border-accent/50 bg-accent/5 px-3 py-2 text-xs">
+              <span className="text-accent">Scenario &ldquo;{active.name}&rdquo; is on.</span> These fields are the base case; editing one changes the base, and the
+              scenario applies on top.
+              {applied.diffs.length > 0 && (
+                <ul className="mt-1 space-y-0.5 text-muted">
+                  {applied.diffs.map((d) => (
+                    <li key={d.lever}>
+                      {d.label}: base {leverText(d.base, d.fmt)} → <span className="text-ink">{leverText(d.value, d.fmt)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           <Group title="Market">
             <NumberField label="Share price" value={a.price} fmt="usd" source={src.price ?? 'You'} onChange={(v) => set('price', v)} />
@@ -716,7 +770,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
           </Group>
         </aside>
 
-        <div>
+        <div className="min-w-0">
           {order.map((id) => {
             const r = byId(id);
             if (!r) return null;
@@ -725,6 +779,7 @@ function Valuation({ ticker, h, company, market }: Loaded) {
                 key={id}
                 sheet={r.sheet}
                 perShare={r.perShare}
+                basePerShare={active ? basePs(id) : undefined}
                 price={price}
                 wb={out.wb}
                 values={out.values}
@@ -755,6 +810,9 @@ function Valuation({ ticker, h, company, market }: Loaded) {
           })}
         </div>
       </div>
+        )}
+        {tab === 'scenarios' && (
+          <ScenariosTab h={h} a={a} src={src} baseResults={baseResults} store={scStore} storeKey={scKey} activeId={activeId} onApply={setActiveId} />
         )}
         {tab === 'value' && <ValueCreation h={h} tax={a.tax} wacc={I.wacc ?? null} re={I.re ?? null} financial={a.financial} name={prettyName(h.name)} />}
         {tab === 'peers' && ticker && <Peers ticker={ticker} onUseMultiples={applyPeerMedians} usingPeers={peerSource === 'sp500'} />}

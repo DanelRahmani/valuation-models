@@ -15,7 +15,7 @@ export function SiteNav() {
   const path = usePathname();
   const norm = (p: string) => (p.endsWith('/') ? p : p + '/');
   return (
-    <header className="relative z-20 mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 pt-6 sm:px-8 lg:px-12">
+    <header className="relative z-20 mx-auto flex max-w-6xl items-center justify-between gap-2 px-4 pt-6 sm:gap-3 sm:px-8 lg:px-12">
       <Link href="/" aria-label="Valuation Models home" className="shrink-0">
         <Mark />
       </Link>
@@ -28,7 +28,7 @@ export function SiteNav() {
               <li key={it.href} className={it.href === '/' ? 'hidden sm:block' : ''}>
                 <Link
                   href={it.href}
-                  className={`relative block px-2 py-2 transition-colors sm:px-3 ${active ? 'font-semibold text-accent' : 'text-muted hover:text-accent'}`}
+                  className={`relative block px-1.5 py-2 transition-colors sm:px-3 ${active ? 'font-semibold text-accent' : 'text-muted hover:text-accent'}`}
                 >
                   {'short' in it && it.short ? (
                     <>

@@ -1,4 +1,4 @@
-import { inputDefs, type Assumptions, type Sources } from './assumptions';
+import { inputDefs, shareCount, type Assumptions, type Sources } from './assumptions';
 import { evaluate, resultOf, type ModelId, type SheetDef, type Values, type Workbook } from './calcsheet';
 import { current } from './extract';
 import { type Base, apvSheet, ddmSheets, totalPayoutSheet, fcfeSheet, fcffSheet, multiplesSheet, riFinancialSheet, riSheet, scenarioSheets } from './models';
@@ -27,13 +27,14 @@ export function buildWorkbook(h: Historicals, a: Assumptions, src: Sources): Wor
   const baseYear: Base = a.basis === 'ttm' && h.ttm ? 'ttm' : (h.years.at(-1) ?? new Date().getFullYear());
   const da0 = current(h, 'da', a.basis);
   const ebitda0 = a.rev0 != null && a.margin0 != null ? a.rev0 * a.margin0 + (da0 ?? 0) / 1e6 : null;
+  const rp = !!a.adjust?.rfAdd;
   const sheets: SheetDef[] = [
-    fcffSheet(a, baseYear, { id: 'fcff', name: 'FCFF', title: 'Discounted free cash flow to the firm', g1: 'g_stage1', margin: 'margin_target', capex: 'capex_pct', shares: 'shares' }),
-    fcfeSheet(baseYear),
-    apvSheet(baseYear),
-    a.financial ? riFinancialSheet(baseYear) : riSheet(baseYear),
+    fcffSheet(a, baseYear, { id: 'fcff', name: 'FCFF', title: 'Discounted free cash flow to the firm', g1: 'g_stage1', margin: 'margin_target', capex: 'capex_pct', shares: shareCount(a) }),
+    fcfeSheet(baseYear, rp, shareCount(a)),
+    apvSheet(baseYear, rp, shareCount(a)),
+    a.financial ? riFinancialSheet(baseYear, rp, shareCount(a)) : riSheet(baseYear, rp, shareCount(a)),
     ...ddmSheets(),
-    totalPayoutSheet(),
+    totalPayoutSheet(shareCount(a)),
     multiplesSheet(a, ebitda0),
   ];
   if (a.aiMode) sheets.push(...scenarioSheets(a, baseYear));
@@ -160,6 +161,9 @@ function judge(wb: Workbook, v: Values, a: Assumptions): string[] {
   return warnings;
 }
 
+/** Above this lead over the industry operating margin, the page notes that the forecast holds the margin for ever. */
+export const MARGIN_GAP_NOTE = 0.15;
+
 /** Above this gap between residual income and FCFE, the residual-income card explains where the difference comes from. */
 export const RI_GAP_NOTE = 0.1;
 
@@ -230,7 +234,8 @@ function sensitivity(wb: Workbook, v: Values): RunOutput['sensitivity'] {
   return { waccs, growths, grid };
 }
 
-export function runAll(h: Historicals, a: Assumptions, src: Sources): RunOutput {
+/** marginFromScenario: the active scenario sets the margin, so the note about holding the base margin for ever is not shown. */
+export function runAll(h: Historicals, a: Assumptions, src: Sources, opts: { marginFromScenario?: boolean } = {}): RunOutput {
   const wb = buildWorkbook(h, a, src);
   const values = evaluate(wb);
   const warnings = judge(wb, values, a);
@@ -242,6 +247,13 @@ export function runAll(h: Historicals, a: Assumptions, src: Sources): RunOutput 
   if (a.oneOff && a.marginTarget === a.oneOff.adjusted)
     warnings.push(
       `FY${a.oneOff.year} operating income includes $${a.oneOff.charges.toFixed(0)}M of impairments, which are non-cash and one-off. The forecast uses the ${(a.oneOff.adjusted * 100).toFixed(1)}% margin before them instead of the reported ${(a.oneOff.latest * 100).toFixed(1)}%. Set the target margin to ${(a.oneOff.latest * 100).toFixed(1)}% to use the reported figure.`,
+    );
+  // A margin far above the industry is held for ever by default. Say so: profitability usually reverts (Fama & French).
+  const peerM = a.peers.margin;
+  const scenarioMargin = opts.marginFromScenario || !!a.adjust?.marginAdd || !!a.adjust?.marginSetW;
+  if (!scenarioMargin && !a.financial && peerM != null && a.marginTarget != null && a.marginTarget - peerM > MARGIN_GAP_NOTE)
+    warnings.push(
+      `The forecast holds a ${(a.marginTarget * 100).toFixed(1)}% operating margin for ever, ${((a.marginTarget - peerM) * 100).toFixed(0)} points above the industry average (${(peerM * 100).toFixed(1)}%, Damodaran). On average, about 38% of such a gap closes each year (Fama and French, 2000); the "Margin reverts to industry" scenario shows what that would mean.`,
     );
   const interest = current(h, 'interestExpense', a.basis);
   // Debt found but far below what the interest bill implies (segment-tagged debt at Deere or Caterpillar's finance arms).
@@ -268,4 +280,18 @@ export function runAll(h: Historicals, a: Assumptions, src: Sources): RunOutput 
     sensitivity: fcffOk && a.terminalMethod === 'gordon' ? sensitivity(wb, values) : null,
     warnings,
   };
+}
+
+/**
+ * The models' values without the reverse DCF and sensitivity grid: cheap enough to run once per saved scenario for the
+ * comparison table and the editor's live preview.
+ */
+export function quickRun(h: Historicals, a: Assumptions, src: Sources): { wb: Workbook; values: Values; results: ModelResult[] } {
+  const wb = buildWorkbook(h, a, src);
+  const values = evaluate(wb);
+  judge(wb, values, a);
+  const results = wb.sheets
+    .filter((s) => !s.id.startsWith('fcff_'))
+    .map((s) => ({ id: s.id, sheet: s, perShare: resultOf(wb, values, s.id), status: s.status, message: s.message }));
+  return { wb, values, results };
 }

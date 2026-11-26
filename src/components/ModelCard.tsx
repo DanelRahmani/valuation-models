@@ -10,14 +10,14 @@ export function CalcTable({ sheet, wb, values }: { sheet: SheetDef; wb: Workbook
   const sel = focus && sheet.rows.find((r) => r.key === focus.row);
   const raw = sel ? sel.cells[focus!.col] : null;
   return (
-    <div>
-      <div className="overflow-x-auto">
+    <div className="min-w-0">
+      <div className="max-h-[60vh] max-w-full overflow-auto overscroll-contain rounded border border-seam/60">
         <table className="num w-full border-collapse text-[0.8125rem]">
-          <thead>
+          <thead className="sticky top-0 z-10 bg-panel">
             <tr className="border-b border-seam text-muted">
-              <th className="sticky left-0 bg-panel py-1.5 pr-4 text-left font-sans text-xs font-normal">{sheet.rows.some((r) => r.fmt === 'usdm') ? '$ millions' : ''}</th>
+              <th className="sticky left-0 z-20 bg-panel py-1.5 pl-2 pr-4 text-left font-sans text-xs font-normal">{sheet.rows.some((r) => r.fmt === 'usdm') ? '$ millions' : ''}</th>
               {sheet.columns.map((c) => (
-                <th key={c} className="px-2 py-1.5 text-right font-normal">
+                <th key={c} className="whitespace-nowrap px-2 py-1.5 text-right font-normal">
                   {c}
                 </th>
               ))}
@@ -26,7 +26,7 @@ export function CalcTable({ sheet, wb, values }: { sheet: SheetDef; wb: Workbook
           <tbody>
             {sheet.rows.map((r) => (
               <tr key={r.key} className={`border-b border-seam/60 ${r.emphasis ? 'font-semibold' : ''}`}>
-                <td className="sticky left-0 min-w-[15rem] bg-panel py-1.5 pr-4 font-sans" title={r.note}>
+                <td className="sticky left-0 min-w-[10rem] bg-panel py-1.5 pl-2 pr-4 font-sans sm:min-w-[15rem]" title={r.note}>
                   {r.label}
                   {r.note && <span className="ml-1 text-accent">*</span>}
                 </td>
@@ -53,7 +53,7 @@ export function CalcTable({ sheet, wb, values }: { sheet: SheetDef; wb: Workbook
           </tbody>
         </table>
       </div>
-      <div className="mt-3 min-h-[3.5rem] rounded border border-seam bg-panel/60 px-3 py-2 text-[0.8125rem]">
+      <div className="mt-3 min-h-[3.5rem] break-words rounded border border-seam bg-panel/60 px-3 py-2 text-[0.8125rem]">
         {sel && typeof raw === 'string' ? (
           <>
             <div>
@@ -76,6 +76,7 @@ export function CalcTable({ sheet, wb, values }: { sheet: SheetDef; wb: Workbook
 export function ModelCard({
   sheet,
   perShare,
+  basePerShare,
   price,
   wb,
   values,
@@ -83,6 +84,8 @@ export function ModelCard({
 }: {
   sheet: SheetDef;
   perShare: number | null;
+  /** Set while a scenario is on: this model's base-case value, shown under the scenario value. */
+  basePerShare?: number | null;
   price: number | null;
   wb: Workbook;
   values: Values;
@@ -106,6 +109,9 @@ export function ModelCard({
             </>
           ) : (
             <Badge tone="accent">{sheet.status === 'na' ? 'Not applicable' : 'Needs input'}</Badge>
+          )}
+          {basePerShare !== undefined && (
+            <div className="num mt-0.5 text-xs text-muted">Base case {basePerShare != null ? fmt(basePerShare, 'usd') : 'n/a'}</div>
           )}
         </div>
       </div>
